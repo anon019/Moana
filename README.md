@@ -109,9 +109,9 @@ Moana 是一个 **AI 原生** 的早期教育内容生成平台，专为 1-6 岁
 ├─────────────────────────────────────────────────────────────────┤
 │  LLM          │  图像生成      │  TTS         │  音乐/视频        │
 │  ────────     │  ──────────    │  ────────    │  ────────────     │
-│  Gemini       │  MiniMax       │  Gemini TTS  │  Suno Music       │
-│  Claude       │  阿里万相      │  Qwen TTS    │  阿里万相视频      │
-│  Qwen         │  Flux          │  MiniMax TTS │  MiniMax Music    │
+│  OpenRouter   │  Gemini Image  │  Gemini TTS  │  Suno V5          │
+│  Gemini 3 Pro │  通义万相      │  Qwen TTS    │  Google Veo 3.1   │
+│  Claude       │  MiniMax       │  MiniMax TTS │  阿里万相视频      │
 └─────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -132,12 +132,18 @@ Moana 是一个 **AI 原生** 的早期教育内容生成平台，专为 1-6 岁
 | **小程序前端** | 微信小程序 (uni-app 编译) |
 | **Web 前端** | Vue 3 + TypeScript + Tailwind CSS |
 | **构建工具** | Vite |
-| **LLM 服务** | Google Gemini (主力), Claude, Qwen |
-| **图像生成** | MiniMax, 阿里万相, Flux |
-| **语音合成** | Gemini TTS, Qwen TTS, MiniMax TTS |
-| **音乐生成** | Suno (主力), MiniMax Music |
-| **视频生成** | 阿里万相, MiniMax Hailuo |
 | **对象存储** | 阿里云 OSS |
+
+### AI 服务配置
+
+| 类别 | 首选服务 | 备选服务 | 环境变量 |
+|------|----------|----------|----------|
+| **图片生成** | Gemini Image / 阿里云通义万相 | MiniMax、Imagen 4、Flux | `IMAGE_PROVIDER` |
+| **儿歌生成** | Suno V5 ⭐ | MiniMax Music 2.0 | `MUSIC_PROVIDER` |
+| **视频生成** | Google Veo 3.1 / 阿里云万相 | MiniMax Hailuo | `VIDEO_PROVIDER` |
+| **LLM** | OpenRouter (多模型网关) | Gemini、Claude | `LLM_PROVIDER` |
+| **TTS 语音** | Gemini TTS / Qwen TTS | MiniMax、Fish Speech | `TTS_PROVIDER` |
+| **提示词增强** | Gemini 3 Pro | - | - |
 
 ---
 
@@ -209,13 +215,19 @@ npm run dev
 # 数据库连接
 DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/moana
 
-# Google Gemini (推荐 - 支持 LLM + TTS + 图像)
+# OpenRouter (LLM 多模型网关 - 推荐)
+OPENROUTER_API_KEY=your_openrouter_api_key
+
+# Google Gemini (TTS + 图像 + 提示词增强)
 GOOGLE_API_KEY=your_google_api_key
 
-# 阿里云 DashScope (视频生成 + 备选 TTS)
+# Suno (儿歌生成 - 推荐)
+SUNO_API_KEY=your_suno_api_key
+
+# 阿里云 DashScope (通义万相图像/视频生成)
 DASHSCOPE_API_KEY=your_dashscope_api_key
 
-# MiniMax (图像 + 音乐生成)
+# MiniMax (备选图像/音乐/视频)
 MINIMAX_API_KEY=your_minimax_api_key
 
 # 阿里云 OSS (媒体文件存储)
@@ -230,11 +242,11 @@ OSS_ENDPOINT=https://oss-cn-hangzhou.aliyuncs.com
 系统支持运行时切换不同的 AI 服务提供商：
 
 ```bash
-# LLM 提供商: gemini | claude | qwen
-LLM_PROVIDER=gemini
+# LLM 提供商: openrouter | gemini | claude
+LLM_PROVIDER=openrouter
 
-# 图像生成: minimax | qwen | flux
-IMAGE_PROVIDER=minimax
+# 图像生成: gemini | wanx | minimax | flux
+IMAGE_PROVIDER=gemini
 
 # 语音合成: gemini | qwen | minimax | fish_speech
 TTS_PROVIDER=gemini
@@ -242,8 +254,8 @@ TTS_PROVIDER=gemini
 # 音乐生成: suno | minimax
 MUSIC_PROVIDER=suno
 
-# 视频生成: wanx | minimax
-VIDEO_PROVIDER=wanx
+# 视频生成: veo | wanx | minimax
+VIDEO_PROVIDER=veo
 ```
 
 ---
