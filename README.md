@@ -1,7 +1,7 @@
 # Moana - AI 原生早教内容生成平台
 
 <p align="center">
-  <img src="miniprogram/static/logo.png" alt="Moana Logo" width="120" />
+  <img width="2816" height="1536" alt="Gemini_Generated_Image_9fsv0b9fsv0b9fsv" src="https://github.com/user-attachments/assets/5a406c66-89e9-4158-bd83-9fa55122d1ff" />
 </p>
 
 <p align="center">
