@@ -1,0 +1,1 @@
+"use strict";const e=require("../../common/vendor.js"),t=e.defineComponent({__name:"SkeletonCard",props:{type:{default:"vertical"}},setup:t=>(t,o)=>({a:e.n(t.type)})}),o=e._export_sfc(t,[["__scopeId","data-v-30b6552c"]]);wx.createComponent(o);

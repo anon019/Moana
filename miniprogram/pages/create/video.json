@@ -1,0 +1,8 @@
+{
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "创作视频",
+  "usingComponents": {
+    "generating-progress": "../../components/GeneratingProgress/GeneratingProgress",
+    "creation-mode-selector": "../../components/CreationModeSelector/CreationModeSelector"
+  }
+}

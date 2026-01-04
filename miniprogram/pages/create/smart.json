@@ -1,0 +1,7 @@
+{
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "智能创作",
+  "usingComponents": {
+    "nursery-rhyme-advanced": "../../components/NurseryRhymeAdvanced/NurseryRhymeAdvanced"
+  }
+}

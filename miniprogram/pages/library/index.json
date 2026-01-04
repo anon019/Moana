@@ -1,0 +1,7 @@
+{
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "内容库",
+  "usingComponents": {
+    "skeleton-card": "../../components/SkeletonCard/SkeletonCard"
+  }
+}

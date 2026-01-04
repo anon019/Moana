@@ -1,0 +1,68 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/create/index",
+    "pages/create/picture-book",
+    "pages/library/index",
+    "pages/play/picture-book",
+    "pages/play/nursery-rhyme",
+    "pages/play/video",
+    "pages/child/index",
+    "pages/settings/index",
+    "pages/profile/index",
+    "pages/profile/add-child",
+    "pages/favorites/index",
+    "pages/create/nursery-rhyme",
+    "pages/create/video",
+    "pages/create/smart",
+    "pages/report/index",
+    "pages/feedback/index"
+  ],
+  "window": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "Moana",
+    "navigationBarBackgroundColor": "#FFFBF7",
+    "backgroundColor": "#FFFBF7",
+    "backgroundColorTop": "#FFFBF7",
+    "backgroundColorBottom": "#FFF8F2"
+  },
+  "tabBar": {
+    "color": "#9C8578",
+    "selectedColor": "#FF7B54",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "text": "首页",
+        "iconPath": "static/tabbar/home.png",
+        "selectedIconPath": "static/tabbar/home-active.png"
+      },
+      {
+        "pagePath": "pages/create/index",
+        "text": "创作",
+        "iconPath": "static/tabbar/create.png",
+        "selectedIconPath": "static/tabbar/create-active.png"
+      },
+      {
+        "pagePath": "pages/library/index",
+        "text": "内容库",
+        "iconPath": "static/tabbar/library.png",
+        "selectedIconPath": "static/tabbar/library-active.png"
+      },
+      {
+        "pagePath": "pages/profile/index",
+        "text": "我的",
+        "iconPath": "static/tabbar/profile.png",
+        "selectedIconPath": "static/tabbar/profile-active.png"
+      }
+    ]
+  },
+  "networkTimeout": {
+    "request": 180000,
+    "connectSocket": 180000,
+    "uploadFile": 180000,
+    "downloadFile": 180000
+  },
+  "usingComponents": {}
+}

@@ -1,0 +1,322 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ========================================
+   「童趣工坊」设计系统 - 全局样式
+   ======================================== */
+
+@layer base {
+  /* 基础字体和颜色 */
+  html {
+    font-family: "Noto Sans SC", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-cream text-ink;
+    background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 60V0h60' fill='none' stroke='%233D5A4C' stroke-opacity='0.03'/%3E%3C/svg%3E");
+  }
+
+  /* 标题样式 */
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display tracking-tight text-ink;
+  }
+
+  /* 选中文字颜色 */
+  ::selection {
+    @apply bg-forest-200 text-forest-900;
+  }
+
+  /* 滚动条样式 */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-canvas;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-bark-300 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-bark-400;
+  }
+}
+
+@layer components {
+  /* ===== 按钮组件 ===== */
+  .btn {
+    @apply px-5 py-2.5 rounded-xl font-medium transition-all duration-200;
+    @apply focus:outline-none focus:ring-2 focus:ring-offset-2;
+  }
+
+  .btn-primary {
+    @apply bg-forest text-white shadow-soft;
+    @apply hover:bg-forest-600 hover:shadow-card hover:-translate-y-0.5;
+    @apply focus:ring-forest-400;
+  }
+
+  .btn-secondary {
+    @apply bg-paper text-forest border-2 border-forest-200;
+    @apply hover:bg-forest-50 hover:border-forest-300;
+    @apply focus:ring-forest-300;
+  }
+
+  .btn-coral {
+    @apply bg-coral text-white shadow-soft;
+    @apply hover:bg-coral-500 hover:shadow-card hover:-translate-y-0.5;
+    @apply focus:ring-coral-400;
+  }
+
+  .btn-sky {
+    @apply bg-sky text-white shadow-soft;
+    @apply hover:bg-sky-500 hover:shadow-card hover:-translate-y-0.5;
+    @apply focus:ring-sky-400;
+  }
+
+  /* ===== 卡片组件 ===== */
+  .card {
+    @apply bg-paper rounded-2xl shadow-card border border-bark-100/50;
+    @apply transition-all duration-300;
+  }
+
+  .card-hover {
+    @apply hover:shadow-lifted hover:-translate-y-1;
+  }
+
+  .card-interactive {
+    @apply cursor-pointer;
+    @apply hover:shadow-lifted hover:-translate-y-1 hover:border-forest-200;
+  }
+
+  /* ===== 输入框组件 ===== */
+  .input {
+    @apply w-full px-4 py-3 bg-paper border-2 border-bark-200 rounded-xl;
+    @apply text-ink placeholder:text-eraser;
+    @apply transition-all duration-200;
+    @apply focus:outline-none focus:border-forest focus:ring-4 focus:ring-forest-100;
+  }
+
+  .input-lg {
+    @apply px-5 py-4 text-lg rounded-2xl;
+  }
+
+  /* ===== 标签组件 ===== */
+  .tag {
+    @apply inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium;
+    @apply transition-all duration-200 cursor-pointer;
+    @apply border-2 border-transparent;
+  }
+
+  .tag-default {
+    @apply bg-canvas text-pencil border-bark-200;
+    @apply hover:bg-bark-100 hover:text-ink;
+  }
+
+  .tag-active {
+    @apply bg-forest text-white border-forest;
+  }
+
+  .tag-coral {
+    @apply bg-coral-100 text-coral-700 border-coral-200;
+    @apply hover:bg-coral-200;
+  }
+
+  .tag-sky {
+    @apply bg-sky-100 text-sky-700 border-sky-200;
+    @apply hover:bg-sky-200;
+  }
+
+  .tag-sage {
+    @apply bg-sage-100 text-sage-700 border-sage-200;
+    @apply hover:bg-sage-200;
+  }
+
+  .tag-lavender {
+    @apply bg-lavender-100 text-lavender-700 border-lavender-200;
+    @apply hover:bg-lavender-200;
+  }
+
+  /* ===== 页面布局 ===== */
+  .page-container {
+    @apply min-h-screen bg-cream;
+    background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 60V0h60' fill='none' stroke='%233D5A4C' stroke-opacity='0.03'/%3E%3C/svg%3E");
+  }
+
+  .page-content {
+    @apply max-w-5xl mx-auto px-4 sm:px-6 py-8;
+  }
+
+  /* ===== 标题样式 ===== */
+  .page-title {
+    @apply text-3xl sm:text-4xl font-black text-forest tracking-tight;
+  }
+
+  .page-subtitle {
+    @apply text-pencil mt-2;
+  }
+
+  .section-title {
+    @apply text-xl font-bold text-ink flex items-center gap-2;
+  }
+
+  /* ===== 装饰元素 ===== */
+  .deco-dot {
+    @apply w-2 h-2 rounded-full bg-forest-300;
+  }
+
+  .deco-line {
+    @apply h-0.5 bg-gradient-to-r from-forest-200 via-coral-200 to-sky-200 rounded-full;
+  }
+
+  .deco-blob {
+    @apply absolute rounded-blob bg-gradient-to-br opacity-20 blur-2xl -z-10;
+  }
+
+  /* ===== 动画类 ===== */
+  .animate-stagger > * {
+    @apply opacity-0 animate-slide-up;
+  }
+
+  .animate-stagger > *:nth-child(1) { animation-delay: 0ms; }
+  .animate-stagger > *:nth-child(2) { animation-delay: 50ms; }
+  .animate-stagger > *:nth-child(3) { animation-delay: 100ms; }
+  .animate-stagger > *:nth-child(4) { animation-delay: 150ms; }
+  .animate-stagger > *:nth-child(5) { animation-delay: 200ms; }
+  .animate-stagger > *:nth-child(6) { animation-delay: 250ms; }
+  .animate-stagger > *:nth-child(7) { animation-delay: 300ms; }
+  .animate-stagger > *:nth-child(8) { animation-delay: 350ms; }
+
+  /* ===== 手绘风格边框 ===== */
+  .border-sketch {
+    border-image: url("data:image/svg+xml,%3Csvg width='100' height='100' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='2' y='2' width='96' height='96' fill='none' stroke='%233D5A4C' stroke-width='2' stroke-dasharray='6,4' rx='12'/%3E%3C/svg%3E") 30 round;
+  }
+
+  /* ===== 创作类型卡片 ===== */
+  .create-card {
+    @apply relative overflow-hidden rounded-2xl p-6 sm:p-8;
+    @apply transition-all duration-300 cursor-pointer;
+    @apply hover:shadow-float hover:-translate-y-2;
+  }
+
+  .create-card::before {
+    content: '';
+    @apply absolute inset-0 opacity-0 transition-opacity duration-300;
+    background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, transparent 50%);
+  }
+
+  .create-card:hover::before {
+    @apply opacity-100;
+  }
+
+  .create-card-book {
+    @apply bg-gradient-to-br from-coral-400 to-coral-500 text-white;
+  }
+
+  .create-card-song {
+    @apply bg-gradient-to-br from-sky-400 to-sky-500 text-white;
+  }
+
+  .create-card-video {
+    @apply bg-gradient-to-br from-sage-400 to-sage-500 text-white;
+  }
+
+  .create-card-smart {
+    @apply bg-gradient-to-br from-lavender-400 to-lavender-500 text-white;
+  }
+
+  /* ===== 灵感标签网格 ===== */
+  .inspiration-grid {
+    @apply grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3;
+  }
+
+  .inspiration-tag {
+    @apply flex items-center gap-2 px-4 py-3 rounded-xl bg-paper;
+    @apply border-2 border-bark-100 text-pencil;
+    @apply transition-all duration-200 cursor-pointer;
+    @apply hover:border-forest-200 hover:bg-forest-50 hover:text-forest;
+  }
+
+  .inspiration-tag.active {
+    @apply bg-forest border-forest text-white;
+  }
+
+  /* ===== 步骤指示器 ===== */
+  .step-indicator {
+    @apply flex items-center justify-center gap-4;
+  }
+
+  .step-item {
+    @apply flex items-center gap-2;
+  }
+
+  .step-number {
+    @apply w-10 h-10 rounded-xl flex items-center justify-center font-bold;
+    @apply transition-all duration-300;
+  }
+
+  .step-number.active {
+    @apply bg-forest text-white shadow-card;
+  }
+
+  .step-number.completed {
+    @apply bg-forest-100 text-forest;
+  }
+
+  .step-number.pending {
+    @apply bg-canvas text-eraser;
+  }
+
+  .step-line {
+    @apply w-12 h-1 rounded-full bg-bark-200;
+    @apply transition-all duration-300;
+  }
+
+  .step-line.completed {
+    @apply bg-forest;
+  }
+}
+
+/* ===== 工具类 ===== */
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .bg-paper-texture {
+    background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  }
+
+  /* 文字渐变 */
+  .text-gradient-forest {
+    @apply bg-gradient-to-r from-forest-600 to-forest-400 bg-clip-text text-transparent;
+  }
+
+  .text-gradient-warm {
+    @apply bg-gradient-to-r from-coral to-bark bg-clip-text text-transparent;
+  }
+
+  /* 玻璃效果（轻微） */
+  .glass-soft {
+    @apply bg-paper/80 backdrop-blur-sm;
+  }
+
+  /* 悬浮动画 */
+  .hover-float {
+    @apply transition-transform duration-300 hover:-translate-y-1;
+  }
+
+  .hover-grow {
+    @apply transition-transform duration-300 hover:scale-105;
+  }
+
+  /* 焦点环 */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-forest-400 focus:ring-offset-2;
+  }
+}

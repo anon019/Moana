@@ -1,0 +1,7 @@
+{
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "意见反馈",
+  "usingComponents": {
+    "nav-bar": "../../components/NavBar/NavBar"
+  }
+}

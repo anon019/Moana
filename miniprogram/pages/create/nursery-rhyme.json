@@ -1,0 +1,9 @@
+{
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "创作儿歌",
+  "usingComponents": {
+    "generating-progress": "../../components/GeneratingProgress/GeneratingProgress",
+    "creation-mode-selector": "../../components/CreationModeSelector/CreationModeSelector",
+    "nursery-rhyme-advanced": "../../components/NurseryRhymeAdvanced/NurseryRhymeAdvanced"
+  }
+}

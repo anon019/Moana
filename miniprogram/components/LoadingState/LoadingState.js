@@ -1,0 +1,1 @@
+"use strict";const e=require("../../common/vendor.js"),t=e.defineComponent({__name:"LoadingState",props:{text:{default:"加载中..."},icon:{default:"🌊"}},setup:t=>(t,o)=>({a:e.t(t.icon),b:e.t(t.text)})}),o=e._export_sfc(t,[["__scopeId","data-v-c3ab0d6a"]]);wx.createComponent(o);

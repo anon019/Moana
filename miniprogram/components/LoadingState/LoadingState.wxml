@@ -1,0 +1,1 @@
+<view class="loading-state data-v-c3ab0d6a"><view class="loading-icon animate-spin data-v-c3ab0d6a"><text class="data-v-c3ab0d6a">{{a}}</text></view><text class="loading-text data-v-c3ab0d6a">{{b}}</text></view>
