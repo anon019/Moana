@@ -43,8 +43,8 @@ def upgrade() -> None:
         op.create_table(
             "task_statuses",
             sa.Column("task_id", sa.String(128), primary_key=True),
-            sa.Column("task_type", sa.String(64), nullable=False, server_default=sa.text("generic")),
-            sa.Column("status", sa.String(32), nullable=False, server_default=sa.text("pending")),
+            sa.Column("task_type", sa.String(64), nullable=False, server_default="generic"),
+            sa.Column("status", sa.String(32), nullable=False, server_default="pending"),
             sa.Column("progress", sa.Integer(), nullable=False, server_default=sa.text("0")),
             sa.Column("stage", sa.String(64), nullable=True),
             sa.Column("message", sa.String(512), nullable=True),
