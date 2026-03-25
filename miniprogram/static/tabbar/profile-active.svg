@@ -1,0 +1,22 @@
+<svg width="81" height="81" viewBox="0 0 81 81" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 我的图标 - 选中状态 -->
+  <defs>
+    <linearGradient id="profileGrad" x1="14" y1="12" x2="67" y2="72" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF8A80"/>
+      <stop offset="100%" stop-color="#FF6B6B"/>
+    </linearGradient>
+  </defs>
+  <!-- 头部 -->
+  <circle cx="40.5" cy="28" r="16" fill="url(#profileGrad)"/>
+  <!-- 身体 -->
+  <path d="M14 72c0-14.4 11.9-26 26.5-26S67 57.6 67 72"
+        fill="url(#profileGrad)"/>
+  <!-- 可爱的脸蛋腮红 -->
+  <circle cx="32" cy="32" r="3" fill="#FFB8B8"/>
+  <circle cx="49" cy="32" r="3" fill="#FFB8B8"/>
+  <!-- 笑眼 -->
+  <path d="M35 26c0 1.1-.9 2-2 2s-2-.9-2-2" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
+  <path d="M50 26c0 1.1-.9 2-2 2s-2-.9-2-2" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
+  <!-- 微笑 -->
+  <path d="M36 38c0 0 2 3 4.5 3s4.5-3 4.5-3" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,561 @@
+// ============================================
+// Moana 全局样式 - 温暖童话花园风格
+// ============================================
+
+@import './variables.scss';
+
+// 重置样式
+page {
+  background: $bg-cream;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-size: $font-base;
+  color: $text-primary;
+  line-height: $line-height-base;
+  box-sizing: border-box;
+  // 不要在 page 上设置 overflow: hidden，否则会阻止整个页面滚动！
+}
+
+view, text, image {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+// ============================================
+// 布局工具类
+// ============================================
+
+.page-container {
+  min-height: 100vh;
+  background: $bg-cream;
+  padding-bottom: calc(#{$spacing-lg} + #{$safe-bottom});
+  // 使用 750rpx 固定宽度，避免微信小程序中 100%/100vw 导致的右侧截断问题
+  width: 750rpx;
+  box-sizing: border-box;
+  // 只禁止水平溢出，允许垂直滚动
+  overflow-x: hidden;
+}
+
+// 温暖主题页面容器
+.warm-page {
+  min-height: 100vh;
+  background: $bg-cream;
+  width: 750rpx;
+  position: relative;
+  overflow: hidden;
+}
+
+.safe-top {
+  padding-top: $safe-top;
+}
+
+.safe-bottom {
+  padding-bottom: $safe-bottom;
+}
+
+// Flex 布局
+.flex {
+  display: flex;
+}
+
+.flex-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.flex-wrap {
+  flex-wrap: wrap;
+}
+
+.flex-1 {
+  flex: 1;
+}
+
+.items-center {
+  align-items: center;
+}
+
+.justify-center {
+  justify-content: center;
+}
+
+// ============================================
+// 间距工具类
+// ============================================
+
+.p-xs { padding: $spacing-xs; }
+.p-sm { padding: $spacing-sm; }
+.p-md { padding: $spacing-md; }
+.p-lg { padding: $spacing-lg; }
+
+.px-sm { padding-left: $spacing-sm; padding-right: $spacing-sm; }
+.px-md { padding-left: $spacing-md; padding-right: $spacing-md; }
+.py-sm { padding-top: $spacing-sm; padding-bottom: $spacing-sm; }
+.py-md { padding-top: $spacing-md; padding-bottom: $spacing-md; }
+
+.m-xs { margin: $spacing-xs; }
+.m-sm { margin: $spacing-sm; }
+.m-md { margin: $spacing-md; }
+.m-lg { margin: $spacing-lg; }
+
+.mt-xs { margin-top: $spacing-xs; }
+.mt-sm { margin-top: $spacing-sm; }
+.mt-md { margin-top: $spacing-md; }
+.mt-lg { margin-top: $spacing-lg; }
+
+.mb-xs { margin-bottom: $spacing-xs; }
+.mb-sm { margin-bottom: $spacing-sm; }
+.mb-md { margin-bottom: $spacing-md; }
+.mb-lg { margin-bottom: $spacing-lg; }
+
+// ============================================
+// 文字样式
+// ============================================
+
+.text-primary { color: $text-primary; }
+.text-secondary { color: $text-secondary; }
+.text-tertiary { color: $text-tertiary; }
+.text-white { color: $text-white; }
+.text-coral { color: $primary; }
+.text-teal { color: $secondary; }
+
+.text-xs { font-size: $font-xs; }
+.text-sm { font-size: $font-sm; }
+.text-base { font-size: $font-base; }
+.text-md { font-size: $font-md; }
+.text-lg { font-size: $font-lg; }
+.text-xl { font-size: $font-xl; }
+.text-xxl { font-size: $font-xxl; }
+
+.font-medium { font-weight: $font-medium; }
+.font-semibold { font-weight: $font-semibold; }
+.font-bold { font-weight: $font-bold; }
+
+.text-center { text-align: center; }
+.text-left { text-align: left; }
+.text-right { text-align: right; }
+
+// 文字省略
+.text-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-ellipsis-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+// ============================================
+// 卡片样式
+// ============================================
+
+.card {
+  background: $bg-card;
+  border-radius: $radius-md;
+  box-shadow: $shadow-card;
+  padding: $spacing-md;
+  margin-bottom: $spacing-sm;
+  position: relative;
+  overflow: hidden;
+
+  // 装饰性圆角背景
+  &::before {
+    content: '';
+    position: absolute;
+    top: -50rpx;
+    right: -50rpx;
+    width: 150rpx;
+    height: 150rpx;
+    background: $accent-soft;
+    border-radius: 50%;
+    opacity: 0.5;
+    pointer-events: none;
+  }
+}
+
+.card-flat {
+  background: $bg-card;
+  border-radius: $radius-md;
+  padding: $spacing-md;
+}
+
+// ============================================
+// 按钮样式
+// ============================================
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-sm $spacing-lg;
+  border-radius: $radius-lg;
+  font-size: $font-base;
+  font-weight: $font-semibold;
+  transition: all $duration-base $ease-out;
+  border: none;
+
+  &::after {
+    border: none;
+  }
+}
+
+.btn-primary {
+  @extend .btn;
+  background: $gradient-primary;
+  color: $text-white;
+  box-shadow: $shadow-button;
+
+  &:active {
+    transform: scale(0.96);
+    box-shadow: $shadow-sm;
+  }
+}
+
+.btn-secondary {
+  @extend .btn;
+  background: $bg-card;
+  color: $primary;
+  border: 2rpx solid $primary-light;
+
+  &:active {
+    background: $bg-warm;
+  }
+}
+
+.btn-teal {
+  @extend .btn;
+  background: $gradient-secondary;
+  color: $text-white;
+
+  &:active {
+    transform: scale(0.96);
+  }
+}
+
+.btn-large {
+  height: 100rpx;
+  font-size: $font-md;
+  border-radius: $radius-xl;
+}
+
+// 儿童模式大按钮
+.btn-child {
+  min-height: 120rpx;
+  min-width: 200rpx;
+  font-size: $font-lg;
+  border-radius: $radius-xl;
+  padding: $spacing-md $spacing-xl;
+}
+
+// ============================================
+// 标签样式
+// ============================================
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: $spacing-xs $spacing-sm;
+  border-radius: $radius-full;
+  font-size: $font-xs;
+  font-weight: $font-medium;
+}
+
+.tag-coral {
+  @extend .tag;
+  background: rgba($primary, 0.12);
+  color: $primary;
+}
+
+.tag-teal {
+  @extend .tag;
+  background: rgba($secondary, 0.12);
+  color: $secondary;
+}
+
+.tag-yellow {
+  @extend .tag;
+  background: $accent-soft;
+  color: #B8860B;
+}
+
+// ============================================
+// 图标容器
+// ============================================
+
+.icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: $radius-md;
+  background: $gradient-warm;
+}
+
+.icon-wrapper-primary {
+  @extend .icon-wrapper;
+  background: rgba($primary, 0.1);
+}
+
+.icon-wrapper-secondary {
+  @extend .icon-wrapper;
+  background: rgba($secondary, 0.1);
+}
+
+// ============================================
+// 动画
+// ============================================
+
+// 淡入
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+// 从下方滑入
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(40rpx);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// 缩放弹入
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+// 弹跳
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10rpx); }
+}
+
+// 脉冲
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+// 旋转
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn $duration-base $ease-out;
+}
+
+.animate-slideUp {
+  animation: slideUp $duration-slow $ease-out;
+}
+
+.animate-scaleIn {
+  animation: scaleIn $duration-base $ease-bounce;
+}
+
+.animate-bounce {
+  animation: bounce 1s ease-in-out infinite;
+}
+
+.animate-pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+// 延迟动画
+.delay-1 { animation-delay: 100ms; }
+.delay-2 { animation-delay: 200ms; }
+.delay-3 { animation-delay: 300ms; }
+.delay-4 { animation-delay: 400ms; }
+
+// ============================================
+// 装饰元素
+// ============================================
+
+// 有机形状装饰
+.blob {
+  position: absolute;
+  border-radius: 50% 40% 60% 50% / 50% 50% 40% 60%;
+  background: $accent-soft;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.blob-coral {
+  @extend .blob;
+  background: rgba($primary, 0.15);
+}
+
+.blob-teal {
+  @extend .blob;
+  background: rgba($secondary, 0.15);
+}
+
+// 波浪背景
+.wave-bg {
+  position: relative;
+
+  &::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 100rpx;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1440 100'%3E%3Cpath fill='%23FFFFFF' d='M0,50 C360,100 1080,0 1440,50 L1440,100 L0,100 Z'/%3E%3C/svg%3E");
+    background-size: cover;
+  }
+}
+
+// ============================================
+// 温暖主题样式
+// ============================================
+
+// 温暖卡片
+.warm-card {
+  background: $bg-card;
+  border: 1rpx solid $border-light;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-card;
+  overflow: hidden;
+}
+
+.warm-card-elevated {
+  background: $bg-elevated;
+  border: 1rpx solid $border-light;
+  border-radius: $radius-lg;
+  box-shadow: $shadow-md;
+}
+
+// 温暖主题文字
+.text-warm {
+  color: $text-primary;
+}
+
+.text-warm-secondary {
+  color: $text-secondary;
+}
+
+.text-warm-muted {
+  color: $text-tertiary;
+}
+
+.text-accent {
+  color: $accent;
+}
+
+// 温暖主题按钮
+.btn-warm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-sm $spacing-lg;
+  background: $bg-card;
+  border: 1rpx solid $border-medium;
+  border-radius: $radius-lg;
+  color: $text-primary;
+  font-size: $font-base;
+  font-weight: $font-semibold;
+  transition: all $duration-base $ease-out;
+
+  &:active {
+    transform: scale(0.96);
+    background: $bg-soft;
+  }
+}
+
+.btn-warm-primary {
+  @extend .btn-warm;
+  background: $book-gradient;
+  border: none;
+  color: $text-white;
+  box-shadow: $shadow-colored-book;
+}
+
+.btn-warm-song {
+  @extend .btn-warm;
+  background: $song-gradient;
+  border: none;
+  color: $text-white;
+  box-shadow: $shadow-colored-song;
+}
+
+.btn-warm-video {
+  @extend .btn-warm;
+  background: $video-gradient;
+  border: none;
+  color: $text-white;
+  box-shadow: $shadow-colored-video;
+}
+
+// 温暖动画
+@keyframes warm-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10rpx); }
+}
+
+@keyframes warm-pulse {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+}
+
+@keyframes warm-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-float {
+  animation: warm-float 3s ease-in-out infinite;
+}
+
+.animate-glow {
+  animation: warm-pulse 2s ease-in-out infinite;
+}
+
+.animate-rotate {
+  animation: warm-rotate 8s linear infinite;
+}
+
+// 内容类型阴影高亮
+.highlight-book {
+  box-shadow: $shadow-colored-book;
+}
+
+.highlight-song {
+  box-shadow: $shadow-colored-song;
+}
+
+.highlight-video {
+  box-shadow: $shadow-colored-video;
+}

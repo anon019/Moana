@@ -1,0 +1,20 @@
+<svg width="81" height="81" viewBox="0 0 81 81" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 首页图标 - 选中状态，珊瑚红色填充 -->
+  <defs>
+    <linearGradient id="homeGrad" x1="12" y1="12" x2="69" y2="75" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF8A80"/>
+      <stop offset="100%" stop-color="#FF6B6B"/>
+    </linearGradient>
+  </defs>
+  <path d="M40.5 12L12 35v34a6 6 0 006 6h45a6 6 0 006-6V35L40.5 12z"
+        fill="url(#homeGrad)"/>
+  <!-- 门 - 白色 -->
+  <rect x="32" y="48" width="17" height="27" rx="3" fill="#FFFFFF"/>
+  <!-- 门把手 -->
+  <circle cx="44" cy="62" r="2" fill="#FF6B6B"/>
+  <!-- 烟囱 -->
+  <rect x="52" y="18" width="10" height="18" rx="2" fill="url(#homeGrad)"/>
+  <!-- 烟 - 可爱的小圆圈 -->
+  <circle cx="57" cy="10" r="3" fill="#FFE66D" opacity="0.8"/>
+  <circle cx="60" cy="5" r="2" fill="#FFE66D" opacity="0.6"/>
+</svg>

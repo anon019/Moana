@@ -1,0 +1,22 @@
+<svg width="81" height="81" viewBox="0 0 81 81" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 内容库图标 - 书架/绘本堆叠 -->
+  <!-- 第一本书 - 斜放 -->
+  <rect x="10" y="22" width="28" height="38" rx="3"
+        transform="rotate(-8 10 22)"
+        fill="none"
+        stroke="#B2BEC3"
+        stroke-width="3.5"/>
+  <!-- 第二本书 -->
+  <rect x="28" y="18" width="28" height="42" rx="3"
+        fill="none"
+        stroke="#B2BEC3"
+        stroke-width="3.5"/>
+  <!-- 第三本书 - 斜放 -->
+  <rect x="42" y="24" width="26" height="36" rx="3"
+        transform="rotate(6 42 24)"
+        fill="none"
+        stroke="#B2BEC3"
+        stroke-width="3.5"/>
+  <!-- 书脊装饰线 -->
+  <line x1="42" y1="22" x2="42" y2="58" stroke="#B2BEC3" stroke-width="2"/>
+</svg>

@@ -1,7 +1,0 @@
-{
-  "navigationStyle": "custom",
-  "navigationBarTitleText": "学习报告",
-  "usingComponents": {
-    "nav-bar": "../../components/NavBar/NavBar"
-  }
-}

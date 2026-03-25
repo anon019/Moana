@@ -1,8 +1,0 @@
-{
-  "navigationStyle": "custom",
-  "navigationBarTitleText": "创作绘本",
-  "usingComponents": {
-    "generating-progress": "../../components/GeneratingProgress/GeneratingProgress",
-    "creation-mode-selector": "../../components/CreationModeSelector/CreationModeSelector"
-  }
-}
