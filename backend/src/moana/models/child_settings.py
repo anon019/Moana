@@ -1,10 +1,8 @@
-# src/moana/models/child_settings.py
 """孩子端配置模型."""
-import uuid
 from datetime import datetime
+from uuid import uuid4
 
-from sqlalchemy import DateTime, Integer, Boolean, ForeignKey, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, Integer, Boolean, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from moana.models.base import Base
@@ -18,16 +16,16 @@ class ChildSettings(Base):
 
     __tablename__ = "child_settings"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+    id: Mapped[str] = mapped_column(
+        String(36),
         primary_key=True,
-        default=uuid.uuid4,
+        default=lambda: str(uuid4()),
     )
-    child_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+    child_id: Mapped[str] = mapped_column(
+        String(36),
         ForeignKey("children.id"),
         nullable=False,
-        unique=True,  # 一对一关系
+        unique=True,
         index=True,
     )
 

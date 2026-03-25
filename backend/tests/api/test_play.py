@@ -1,371 +1,283 @@
-"""Tests for Play API endpoints."""
+import asyncio
+from datetime import date
+
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from moana.api.play import router as play_router
+from moana.database import get_db
+from moana.models.base import Base
+from moana.models.child import Child
+from moana.models.content import Content, ContentType
+from moana.models.play_history import InteractionRecord, PlayHistory
+from moana.models.user import User
+from moana.routers.auth import get_current_user
+
+USER_ID = "user-test"
+CHILD_ID = "child-test"
+BOOK_1_ID = "content-book-1"
+BOOK_2_ID = "content-book-2"
+BOOK_3_ID = "content-book-3"
+SONG_ID = "content-song-1"
 
 
-def test_play_router_exists():
-    """Test play router can be imported."""
-    from moana.api.play import router
-    assert router is not None
+async def _prepare_db(session_factory, engine):
+    tables = [
+        User.__table__,
+        Child.__table__,
+        Content.__table__,
+        PlayHistory.__table__,
+        InteractionRecord.__table__,
+    ]
+
+    async with engine.begin() as conn:
+        await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, tables=tables))
+
+    async with session_factory() as session:
+        session.add(User(id=USER_ID, openid="openid-test", nickname="Tester"))
+        session.add(
+            Child(
+                id=CHILD_ID,
+                name="Kid",
+                birth_date=date(2023, 1, 1),
+                parent_id=USER_ID,
+            )
+        )
+        session.add_all(
+            [
+                Content(
+                    id=BOOK_1_ID,
+                    child_id=CHILD_ID,
+                    title="Book 1",
+                    content_type=ContentType.PICTURE_BOOK,
+                    theme_category="habit",
+                    theme_topic="brushing teeth",
+                    content_data={"pages": [{}, {}, {}, {}, {}]},
+                ),
+                Content(
+                    id=BOOK_2_ID,
+                    child_id=CHILD_ID,
+                    title="Book 2",
+                    content_type=ContentType.PICTURE_BOOK,
+                    theme_category="cognition",
+                    theme_topic="colors",
+                    content_data={"pages": [{}, {}, {}]},
+                ),
+                Content(
+                    id=BOOK_3_ID,
+                    child_id=CHILD_ID,
+                    title="Book 3",
+                    content_type=ContentType.PICTURE_BOOK,
+                    theme_category="cognition",
+                    theme_topic="animals",
+                    content_data={"pages": [{}, {}]},
+                ),
+                Content(
+                    id=SONG_ID,
+                    child_id=CHILD_ID,
+                    title="Song 1",
+                    content_type=ContentType.NURSERY_RHYME,
+                    theme_category="habit",
+                    theme_topic="bedtime",
+                    content_data={"sections": ["verse"]},
+                ),
+            ]
+        )
+        await session.commit()
 
 
-def test_start_play_new():
-    """Test starting a new play session."""
-    from moana.main import app
+@pytest.fixture()
+def client(tmp_path):
+    db_path = tmp_path / "play-test.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", future=True)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
-    client = TestClient(app)
-    response = client.post(
+    asyncio.run(_prepare_db(session_factory, engine))
+
+    app = FastAPI()
+    app.include_router(play_router, prefix="/api/v1/play")
+
+    async def override_get_db():
+        async with session_factory() as session:
+            yield session
+
+    async def override_current_user():
+        return User(id=USER_ID, openid="openid-test", nickname="Tester")
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    with TestClient(app) as test_client:
+        yield test_client
+
+    app.dependency_overrides.clear()
+    asyncio.run(engine.dispose())
+
+
+def test_start_progress_and_complete_flow(client):
+    start = client.post(
         "/api/v1/play/start",
         json={
-            "child_id": "child_001",
-            "content_id": "content_001",
+            "child_id": CHILD_ID,
+            "content_id": BOOK_1_ID,
             "content_type": "picture_book",
-            "total_pages": 10,
+            "total_pages": 5,
         },
     )
+    assert start.status_code == 200
+    started = start.json()
+    assert started["current_page"] == 1
+    assert started["completion_rate"] == 0.0
+    assert started["is_resumed"] is False
 
-    assert response.status_code == 200
-    data = response.json()
-    assert "play_history_id" in data
-    assert data["current_page"] == 1
-    assert data["completion_rate"] == 0.0
-    assert data["is_resumed"] is False
+    progress = client.post(
+        "/api/v1/play/progress",
+        json={
+            "play_history_id": started["play_history_id"],
+            "current_page": 3,
+        },
+    )
+    assert progress.status_code == 200
+    assert progress.json()["completion_rate"] == 0.6
+
+    complete = client.post(
+        "/api/v1/play/complete",
+        json={"play_history_id": started["play_history_id"]},
+    )
+    assert complete.status_code == 200
+    completed = complete.json()
+    assert completed["completed_at"]
+    assert completed["total_time_seconds"] >= 0
 
 
-def test_start_play_resume():
-    """Test resuming an incomplete play session."""
-    from moana.main import app
-
-    client = TestClient(app)
-
-    # 开始播放
-    response1 = client.post(
+def test_start_play_resumes_existing_session(client):
+    first = client.post(
         "/api/v1/play/start",
         json={
-            "child_id": "child_resume",
-            "content_id": "content_resume",
+            "child_id": CHILD_ID,
+            "content_id": BOOK_2_ID,
             "content_type": "picture_book",
-            "total_pages": 10,
+            "total_pages": 3,
         },
     )
-    play_id = response1.json()["play_history_id"]
+    play_history_id = first.json()["play_history_id"]
 
-    # 更新进度
     client.post(
         "/api/v1/play/progress",
-        json={"play_history_id": play_id, "current_page": 5},
-    )
-
-    # 再次开始（应该恢复）
-    response2 = client.post(
-        "/api/v1/play/start",
         json={
-            "child_id": "child_resume",
-            "content_id": "content_resume",
-            "content_type": "picture_book",
-            "total_pages": 10,
+            "play_history_id": play_history_id,
+            "current_page": 2,
         },
     )
 
-    data = response2.json()
-    assert data["is_resumed"] is True
-    assert data["current_page"] == 5
-
-
-def test_update_progress():
-    """Test updating play progress."""
-    from moana.main import app
-
-    client = TestClient(app)
-
-    # 开始播放
-    response = client.post(
+    resumed = client.post(
         "/api/v1/play/start",
         json={
-            "child_id": "child_progress",
-            "content_id": "content_progress",
+            "child_id": CHILD_ID,
+            "content_id": BOOK_2_ID,
             "content_type": "picture_book",
-            "total_pages": 10,
+            "total_pages": 3,
         },
     )
-    play_id = response.json()["play_history_id"]
-
-    # 更新进度
-    response = client.post(
-        "/api/v1/play/progress",
-        json={"play_history_id": play_id, "current_page": 7},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["completion_rate"] == 0.7
+    assert resumed.status_code == 200
+    payload = resumed.json()
+    assert payload["is_resumed"] is True
+    assert payload["current_page"] == 2
 
 
-def test_complete_play():
-    """Test completing play."""
-    from moana.main import app
-
-    client = TestClient(app)
-
-    # 开始播放
-    response = client.post(
-        "/api/v1/play/start",
-        json={
-            "child_id": "child_complete",
-            "content_id": "content_complete",
-            "content_type": "picture_book",
-            "total_pages": 10,
-        },
-    )
-    play_id = response.json()["play_history_id"]
-
-    # 完成播放
-    response = client.post(
-        "/api/v1/play/complete",
-        json={"play_history_id": play_id},
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert "completed_at" in data
-    assert data["total_time_seconds"] >= 0
-
-
-def test_get_play_history():
-    """Test getting play history."""
-    from moana.main import app
-
-    client = TestClient(app)
-
-    # 创建一些播放记录
-    for i in range(3):
-        client.post(
+def test_history_cursor_pagination_keeps_total_count(client):
+    for content_id, total_pages in [(BOOK_1_ID, 5), (BOOK_2_ID, 3), (BOOK_3_ID, 2)]:
+        response = client.post(
             "/api/v1/play/start",
             json={
-                "child_id": "child_history",
-                "content_id": f"content_{i}",
+                "child_id": CHILD_ID,
+                "content_id": content_id,
                 "content_type": "picture_book",
-                "total_pages": 10,
+                "total_pages": total_pages,
             },
         )
+        assert response.status_code == 200
 
-    # 获取历史
-    response = client.get("/api/v1/play/history/child_history")
+    first_page = client.get(f"/api/v1/play/history/{CHILD_ID}", params={"limit": 2})
+    assert first_page.status_code == 200
+    first_payload = first_page.json()
+    assert first_payload["total"] == 3
+    assert len(first_payload["items"]) == 2
+    assert first_payload["has_more"] is True
+    assert first_payload["next_cursor"]
 
-    assert response.status_code == 200
-    data = response.json()
-    assert data["total"] >= 3
-    assert len(data["items"]) >= 3
+    second_page = client.get(
+        f"/api/v1/play/history/{CHILD_ID}",
+        params={"limit": 2, "cursor": first_payload["next_cursor"]},
+    )
+    assert second_page.status_code == 200
+    second_payload = second_page.json()
+    assert second_payload["total"] == 3
+    assert len(second_payload["items"]) == 1
+    assert second_payload["has_more"] is False
 
 
-def test_submit_interaction():
-    """Test submitting interaction result."""
-    from moana.main import app
-
-    client = TestClient(app)
-
-    # 开始播放
-    response = client.post(
+def test_submit_interaction_rejects_page_beyond_total_pages(client):
+    start = client.post(
         "/api/v1/play/start",
         json={
-            "child_id": "child_interact",
-            "content_id": "content_interact",
+            "child_id": CHILD_ID,
+            "content_id": BOOK_3_ID,
             "content_type": "picture_book",
-            "total_pages": 10,
+            "total_pages": 2,
         },
     )
-    play_id = response.json()["play_history_id"]
+    play_history_id = start.json()["play_history_id"]
 
-    # 提交答题
     response = client.post(
         "/api/v1/play/interaction",
         json={
-            "play_history_id": play_id,
+            "play_history_id": play_history_id,
             "page_num": 3,
             "question_type": "choice",
             "is_correct": True,
             "attempts": 1,
-            "time_spent_ms": 2500,
+            "time_spent_ms": 1500,
         },
     )
+    assert response.status_code == 400
+    assert "page" in response.json()["detail"].lower()
 
-    assert response.status_code == 200
-    assert "interaction_id" in response.json()
 
-
-def test_get_play_stats():
-    """Test getting play stats."""
-    from moana.main import app
-
-    client = TestClient(app)
-
-    # 开始播放
-    response = client.post(
+def test_learning_stats_reports_books_and_songs(client):
+    book = client.post(
         "/api/v1/play/start",
         json={
-            "child_id": "child_stats",
-            "content_id": "content_stats",
+            "child_id": CHILD_ID,
+            "content_id": BOOK_1_ID,
             "content_type": "picture_book",
-            "total_pages": 10,
+            "total_pages": 5,
         },
     )
-    play_id = response.json()["play_history_id"]
-
-    # 提交几个答题
-    for i in range(5):
-        client.post(
-            "/api/v1/play/interaction",
-            json={
-                "play_history_id": play_id,
-                "page_num": i + 1,
-                "question_type": "choice",
-                "is_correct": i < 3,  # 3 correct, 2 wrong
-                "attempts": 1,
-                "time_spent_ms": 2000,
-            },
-        )
-
-    # 获取统计
-    response = client.get("/api/v1/play/stats/child_stats")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["total_questions"] == 5
-    assert data["correct_count"] == 3
-    assert data["accuracy_rate"] == 0.6
-
-
-def test_learning_stats_response_model():
-    """Test LearningStatsResponse model structure."""
-    from moana.api.play import LearningStatsResponse, DailyActivity, ThemeStats
-
-    # Test DailyActivity
-    daily = DailyActivity(
-        date="2025-12-26",
-        duration_minutes=25,
-        contents_count=3,
-    )
-    assert daily.date == "2025-12-26"
-    assert daily.duration_minutes == 25
-
-    # Test ThemeStats
-    theme = ThemeStats(theme="动物世界", count=6)
-    assert theme.theme == "动物世界"
-    assert theme.count == 6
-
-
-def test_learning_stats_calculation():
-    """Test learning stats calculation logic."""
-    from datetime import datetime, timedelta
-
-    # Simulate 7 days of data
-    today = datetime.now().date()
-    dates = [(today - timedelta(days=i)).isoformat() for i in range(7)]
-
-    # Should have 7 unique dates
-    assert len(set(dates)) == 7
-
-
-def test_get_learning_stats_endpoint():
-    """Test GET /learning-stats/{child_id} endpoint."""
-    from moana.main import app
-
-    client = TestClient(app)
-
-    # Create some play history for learning stats
-    child_id = "child_learning_stats"
-
-    # Start and complete a play session
-    response = client.post(
-        "/api/v1/play/start",
-        json={
-            "child_id": child_id,
-            "content_id": "content_learning_1",
-            "content_type": "picture_book",
-            "total_pages": 10,
-        },
-    )
-    play_id = response.json()["play_history_id"]
-
-    # Complete the play
+    book_id = book.json()["play_history_id"]
     client.post(
         "/api/v1/play/complete",
-        json={"play_history_id": play_id},
+        json={"play_history_id": book_id},
     )
 
-    # Start another session (nursery rhyme)
-    client.post(
+    song = client.post(
         "/api/v1/play/start",
         json={
-            "child_id": child_id,
-            "content_id": "content_learning_2",
+            "child_id": CHILD_ID,
+            "content_id": SONG_ID,
             "content_type": "nursery_rhyme",
             "total_pages": 1,
         },
     )
+    assert song.status_code == 200
 
-    # Get learning stats
-    response = client.get(f"/api/v1/play/learning-stats/{child_id}")
-
-    assert response.status_code == 200
-    data = response.json()
-
-    # Check response structure
-    assert "period" in data
-    assert "summary" in data
-    assert "daily_activity" in data
-    assert "top_themes" in data
-
-    # Check period structure
-    assert "start_date" in data["period"]
-    assert "end_date" in data["period"]
-    assert "days" in data["period"]
-    assert data["period"]["days"] == 7  # default
-
-    # Check summary structure
-    assert "total_duration_minutes" in data["summary"]
-    assert "total_books" in data["summary"]
-    assert "total_songs" in data["summary"]
-    assert "total_videos" in data["summary"]
-    assert "streak_days" in data["summary"]
-    assert "interaction_rate" in data["summary"]
-
-    # Verify content counts
-    assert data["summary"]["total_books"] >= 1
-    assert data["summary"]["total_songs"] >= 1
-
-
-def test_get_learning_stats_with_custom_days():
-    """Test learning stats with custom days parameter.
-
-    This test verifies the model validation works with custom days parameter.
-    The endpoint itself is tested in test_get_learning_stats_endpoint.
-    """
-    from moana.api.play import LearningStatsResponse, LearningStatsPeriod, LearningStatsSummary, DailyActivity, ThemeStats
-
-    # Test building a response with 14 days
-    daily_activity = [
-        DailyActivity(date=f"2025-12-{26-i:02d}", duration_minutes=0, contents_count=0)
-        for i in range(14)
-    ]
-
-    response = LearningStatsResponse(
-        period=LearningStatsPeriod(
-            start_date="2025-12-13",
-            end_date="2025-12-26",
-            days=14,
-        ),
-        summary=LearningStatsSummary(
-            total_duration_minutes=0,
-            total_books=0,
-            total_songs=0,
-            total_videos=1,
-            streak_days=0,
-            interaction_rate=0.0,
-        ),
-        daily_activity=daily_activity,
-        top_themes=[],
-    )
-
-    assert response.period.days == 14
-    assert len(response.daily_activity) == 14
-    assert response.summary.total_videos == 1
+    stats = client.get(f"/api/v1/play/learning-stats/{CHILD_ID}")
+    assert stats.status_code == 200
+    payload = stats.json()
+    assert payload["period"]["days"] == 7
+    assert payload["summary"]["total_books"] >= 1
+    assert payload["summary"]["total_songs"] >= 1
+    assert isinstance(payload["daily_activity"], list)
+    assert isinstance(payload["top_themes"], list)

@@ -1,10 +1,11 @@
 # src/moana/routers/analytics.py
-from typing import Annotated, Optional
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from moana.config import get_settings
 from moana.database import get_db
 from moana.models import Child
 from moana.models.user import User
@@ -14,9 +15,6 @@ from moana.agents.analytics import AnalyticsAgent
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
-# 家庭共享模式：管理员 openid
-ADMIN_OPENID = "admin_web_panel"
-
 
 async def _get_accessible_child(
     db: AsyncSession,
@@ -24,23 +22,22 @@ async def _get_accessible_child(
     current_user: User,
 ) -> Child | None:
     """获取用户可访问的宝贝（家庭共享模式）."""
+    settings = get_settings()
     result = await db.execute(select(Child).where(Child.id == child_id))
     child = result.scalar_one_or_none()
 
     if not child:
         return None
 
-    # 自己的宝贝
     if child.parent_id == current_user.id:
         return child
 
-    # 管理员的宝贝（家庭共享）
     admin_result = await db.execute(
-        select(User).where(User.openid == ADMIN_OPENID)
+        select(User.id).where(User.openid == settings.admin_openid)
     )
-    admin_user = admin_result.scalar_one_or_none()
+    admin_user_id = admin_result.scalar_one_or_none()
 
-    if admin_user and child.parent_id == admin_user.id:
+    if admin_user_id and child.parent_id == admin_user_id:
         return child
 
     return None
@@ -49,9 +46,9 @@ async def _get_accessible_child(
 @router.get("/child/{child_id}/stats")
 async def get_child_stats(
     child_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     days: Annotated[int, Query(ge=1, le=365)] = 30,
-    current_user: Annotated[User, Depends(get_current_user)] = None,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> dict:
     """Get statistics for a child (家庭共享模式).
 
@@ -76,8 +73,8 @@ async def get_child_stats(
 @router.get("/child/{child_id}/insights")
 async def get_child_insights(
     child_id: str,
-    current_user: Annotated[User, Depends(get_current_user)] = None,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Get AI-generated insights for a child (家庭共享模式).
 
@@ -92,11 +89,9 @@ async def get_child_insights(
             detail="Child not found",
         )
 
-    # Get statistics
     stats_service = AnalyticsStatsService()
     stats = await stats_service.get_child_stats(db, child_id)
 
-    # Generate insights
     analytics_agent = AnalyticsAgent()
     age_months = child.age_in_months()
     insights = await analytics_agent.generate_insights(
@@ -114,9 +109,9 @@ async def get_child_insights(
 @router.get("/child/{child_id}/daily")
 async def get_daily_breakdown(
     child_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     days: Annotated[int, Query(ge=1, le=30)] = 7,
-    current_user: Annotated[User, Depends(get_current_user)] = None,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> dict:
     """Get daily activity breakdown for a child (家庭共享模式).
 

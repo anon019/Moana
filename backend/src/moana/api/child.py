@@ -6,10 +6,13 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from moana.config import get_settings
 from moana.database import get_db
 from moana.models.child import Child
+from moana.models.child_settings import ChildSettings
 from moana.models.user import User
 from moana.routers.auth import get_current_user
 
@@ -18,14 +21,16 @@ router = APIRouter()
 
 # ========== Request/Response Schemas ==========
 
+
 class ChildResponse(BaseModel):
     """孩子信息响应."""
+
     id: str
     name: str
     birth_date: date
     avatar_url: Optional[str] = None
-    favorite_characters: list[str] = []
-    interests: list[str] = []
+    favorite_characters: list[str] = Field(default_factory=list)
+    interests: list[str] = Field(default_factory=list)
     current_stage: Optional[str] = None
 
     model_config = {"from_attributes": True}
@@ -33,6 +38,7 @@ class ChildResponse(BaseModel):
 
 class CreateChildRequest(BaseModel):
     """创建孩子请求."""
+
     name: str = Field(..., min_length=1, max_length=50, description="孩子名字")
     birth_date: date = Field(..., description="出生日期")
     avatar_url: Optional[str] = Field(None, max_length=500, description="头像URL")
@@ -42,6 +48,7 @@ class CreateChildRequest(BaseModel):
 
 class UpdateChildRequest(BaseModel):
     """更新孩子请求."""
+
     name: Optional[str] = Field(None, min_length=1, max_length=50, description="孩子名字")
     birth_date: Optional[date] = Field(None, description="出生日期")
     avatar_url: Optional[str] = Field(None, max_length=500, description="头像URL")
@@ -52,6 +59,7 @@ class UpdateChildRequest(BaseModel):
 
 class ChildSettingsResponse(BaseModel):
     """孩子设置响应."""
+
     child_id: str
     daily_limit_minutes: int
     session_limit_minutes: int
@@ -60,52 +68,34 @@ class ChildSettingsResponse(BaseModel):
 
 class UpdateChildSettingsRequest(BaseModel):
     """更新孩子设置请求."""
+
     daily_limit_minutes: Optional[int] = Field(
         default=None,
         ge=10,
         le=180,
-        description="Daily limit in minutes (10-180)"
+        description="Daily limit in minutes (10-180)",
     )
     session_limit_minutes: Optional[int] = Field(
         default=None,
         ge=5,
         le=60,
-        description="Session limit in minutes (5-60)"
+        description="Session limit in minutes (5-60)",
     )
     rest_reminder_enabled: Optional[bool] = Field(
         default=None,
-        description="Whether to enable rest reminder"
+        description="Whether to enable rest reminder",
     )
 
 
-# ========== 内存存储（MVP 阶段，后续替换为数据库） ==========
-
-_child_settings: dict[str, dict] = {}
-
-# 默认设置
-_default_settings = {
-    "daily_limit_minutes": 60,
-    "session_limit_minutes": 20,
-    "rest_reminder_enabled": True,
-}
+async def _get_admin_user_id(db: AsyncSession) -> str | None:
+    settings = get_settings()
+    result = await db.execute(
+        select(User.id).where(User.openid == settings.admin_openid)
+    )
+    return result.scalar_one_or_none()
 
 
-def _get_or_create_settings(child_id: str) -> dict:
-    """获取或创建孩子设置."""
-    if child_id not in _child_settings:
-        _child_settings[child_id] = {
-            "child_id": child_id,
-            **_default_settings,
-        }
-    return _child_settings[child_id]
-
-
-# ========== 家庭共享模式配置 ==========
-# 管理员 openid，用于家庭共享模式
-ADMIN_OPENID = "admin_web_panel"
-
-
-async def get_accessible_child(
+async def _get_accessible_child(
     db: AsyncSession,
     child_id: str,
     current_user: User,
@@ -116,30 +106,60 @@ async def get_accessible_child(
     1. 自己创建的宝贝
     2. 管理员创建的宝贝（家庭共享）
     """
-    # 先查找这个宝贝
-    result = await db.execute(select(Child).where(Child.id == child_id))
+    result = await db.execute(
+        select(Child).where(Child.id == child_id)
+    )
     child = result.scalar_one_or_none()
 
     if not child:
         return None
 
-    # 检查是否是自己的宝贝
     if child.parent_id == current_user.id:
         return child
 
-    # 检查是否是管理员的宝贝（家庭共享）
-    admin_result = await db.execute(
-        select(User).where(User.openid == ADMIN_OPENID)
-    )
-    admin_user = admin_result.scalar_one_or_none()
-
-    if admin_user and child.parent_id == admin_user.id:
+    admin_user_id = await _get_admin_user_id(db)
+    if admin_user_id and child.parent_id == admin_user_id:
         return child
 
     return None
 
 
+async def _get_or_create_settings(db: AsyncSession, child: Child) -> ChildSettings:
+    """获取或创建孩子设置."""
+    result = await db.execute(
+        select(ChildSettings).where(ChildSettings.child_id == child.id)
+    )
+    settings = result.scalar_one_or_none()
+
+    if settings:
+        return settings
+
+    defaults = ChildSettings.get_defaults()
+
+    settings = ChildSettings(
+        child_id=child.id,
+        **defaults,
+    )
+
+    db.add(settings)
+    try:
+        await db.commit()
+        await db.refresh(settings)
+        return settings
+    except IntegrityError:
+        # Possible concurrent create
+        await db.rollback()
+        result = await db.execute(
+            select(ChildSettings).where(ChildSettings.child_id == child.id)
+        )
+        settings = result.scalar_one_or_none()
+        if settings is None:
+            raise
+        return settings
+
+
 # ========== API Endpoints ==========
+
 
 @router.get("/list", response_model=list[ChildResponse])
 async def list_children(
@@ -152,30 +172,23 @@ async def list_children(
     - 如果当前用户有自己的宝贝，返回自己的
     - 否则返回管理员创建的宝贝（共享给所有家庭成员）
     """
-    # 先查找当前用户自己的宝贝
     result = await db.execute(
         select(Child).where(Child.parent_id == current_user.id)
     )
     children = result.scalars().all()
 
-    # 如果用户有自己的宝贝，直接返回
     if children:
         return [ChildResponse.model_validate(child) for child in children]
 
-    # 家庭共享模式：返回管理员的宝贝
-    admin_result = await db.execute(
-        select(User).where(User.openid == ADMIN_OPENID)
+    admin_user_id = await _get_admin_user_id(db)
+    if not admin_user_id:
+        return []
+
+    result = await db.execute(
+        select(Child).where(Child.parent_id == admin_user_id)
     )
-    admin_user = admin_result.scalar_one_or_none()
-
-    if admin_user:
-        result = await db.execute(
-            select(Child).where(Child.parent_id == admin_user.id)
-        )
-        children = result.scalars().all()
-        return [ChildResponse.model_validate(child) for child in children]
-
-    return []
+    children = result.scalars().all()
+    return [ChildResponse.model_validate(child) for child in children]
 
 
 @router.post("", response_model=ChildResponse, status_code=status.HTTP_201_CREATED)
@@ -212,7 +225,7 @@ async def get_child(
 
     可以获取自己的宝贝或管理员创建的共享宝贝。
     """
-    child = await get_accessible_child(db, child_id, current_user)
+    child = await _get_accessible_child(db, child_id, current_user)
 
     if not child:
         raise HTTPException(
@@ -249,7 +262,6 @@ async def update_child(
             detail="Child not found",
         )
 
-    # 更新非 None 字段
     if request.name is not None:
         child.name = request.name
     if request.birth_date is not None:
@@ -307,7 +319,7 @@ async def get_child_settings(
     如果没有设置过，返回默认值。
     可以获取自己的宝贝或管理员创建的共享宝贝的设置。
     """
-    child = await get_accessible_child(db, child_id, current_user)
+    child = await _get_accessible_child(db, child_id, current_user)
 
     if not child:
         raise HTTPException(
@@ -315,8 +327,13 @@ async def get_child_settings(
             detail="Child not found",
         )
 
-    settings = _get_or_create_settings(child_id)
-    return ChildSettingsResponse(**settings)
+    settings = await _get_or_create_settings(db, child)
+    return ChildSettingsResponse(
+        child_id=settings.child_id,
+        daily_limit_minutes=settings.daily_limit_minutes,
+        session_limit_minutes=settings.session_limit_minutes,
+        rest_reminder_enabled=settings.rest_reminder_enabled,
+    )
 
 
 @router.put("/{child_id}/settings", response_model=ChildSettingsResponse)
@@ -331,7 +348,6 @@ async def update_child_settings(
     只更新请求中提供的字段。
     需要认证，只能更新自己孩子的设置。
     """
-    # 验证孩子存在且属于当前用户
     result = await db.execute(
         select(Child).where(
             Child.id == child_id,
@@ -346,14 +362,21 @@ async def update_child_settings(
             detail="Child not found",
         )
 
-    settings = _get_or_create_settings(child_id)
+    settings = await _get_or_create_settings(db, child)
 
-    # 更新非 None 字段
     if request.daily_limit_minutes is not None:
-        settings["daily_limit_minutes"] = request.daily_limit_minutes
+        settings.daily_limit_minutes = request.daily_limit_minutes
     if request.session_limit_minutes is not None:
-        settings["session_limit_minutes"] = request.session_limit_minutes
+        settings.session_limit_minutes = request.session_limit_minutes
     if request.rest_reminder_enabled is not None:
-        settings["rest_reminder_enabled"] = request.rest_reminder_enabled
+        settings.rest_reminder_enabled = request.rest_reminder_enabled
 
-    return ChildSettingsResponse(**settings)
+    await db.commit()
+    await db.refresh(settings)
+
+    return ChildSettingsResponse(
+        child_id=settings.child_id,
+        daily_limit_minutes=settings.daily_limit_minutes,
+        session_limit_minutes=settings.session_limit_minutes,
+        rest_reminder_enabled=settings.rest_reminder_enabled,
+    )

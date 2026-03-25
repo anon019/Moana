@@ -1,4 +1,4 @@
-# src/moana/models/__init__.py
+"""ORM model package exports."""
 from moana.models.base import Base, TimestampMixin
 from moana.models.child import Child
 from moana.models.content import (
@@ -16,6 +16,7 @@ from moana.models.favorite import Favorite
 from moana.models.share import Share, SharePlatform
 from moana.models.generation_log import GenerationLog, GenerationStep, LogLevel
 from moana.models.feedback import Feedback, FeedbackType, FeedbackStatus
+from moana.models.task_status import TaskStatus
 
 __all__ = [
     "Base",
@@ -30,6 +31,7 @@ __all__ = [
     "PlayHistory",
     "InteractionRecord",
     "ChildSettings",
+    "TaskStatus",
     "User",
     "Favorite",
     "Share",

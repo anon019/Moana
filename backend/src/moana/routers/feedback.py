@@ -41,7 +41,7 @@ class FeedbackResponse(BaseModel):
 async def submit_feedback(
     request: FeedbackRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[Optional[User], Depends(get_current_user_optional)] = None,
+    current_user: Annotated[Optional[User], Depends(get_current_user_optional)],
 ) -> FeedbackResponse:
     """Submit user feedback.
 

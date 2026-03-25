@@ -1,6 +1,6 @@
 # src/moana/utils/security.py
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import jwt
 
@@ -13,7 +13,7 @@ def create_access_token(
 ) -> str:
     """Create a JWT access token."""
     settings = get_settings()
-    to_encode = data.copy()
+    to_encode = dict(data)
 
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
@@ -37,7 +37,7 @@ def create_refresh_token(
 ) -> str:
     """Create a JWT refresh token."""
     settings = get_settings()
-    to_encode = data.copy()
+    to_encode = dict(data)
 
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
@@ -55,8 +55,11 @@ def create_refresh_token(
     )
 
 
-def decode_access_token(token: str) -> Optional[dict]:
+def decode_access_token(token: Any) -> Optional[dict[str, Any]]:
     """Decode and verify a JWT token."""
+    if not isinstance(token, str) or not token:
+        return None
+
     settings = get_settings()
 
     try:
@@ -65,8 +68,17 @@ def decode_access_token(token: str) -> Optional[dict]:
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
         )
-        return payload
     except jwt.ExpiredSignatureError:
         return None
     except jwt.InvalidTokenError:
         return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    user_id = payload.get("sub")
+    if not isinstance(user_id, (str, int)) or user_id is None:
+        return None
+
+    payload["sub"] = str(user_id)
+    return payload

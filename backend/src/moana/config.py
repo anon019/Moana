@@ -12,18 +12,18 @@ class Settings(BaseSettings):
     )
 
     # Database
-    database_url: str = "postgresql+asyncpg://moana:your_password@localhost:5432/moana"
+    database_url: str = "postgresql+asyncpg://moana:moana123@localhost:5432/moana"
 
     # === Provider 选择（运行时可切换） ===
     # LLM 支持: gemini (原生) | openrouter (多模型) | claude
     llm_provider: str = "gemini"  # gemini | openrouter | claude
-    image_provider: str = "gemini"  # gemini | wanx | imagen | minimax | qwen | flux
+    image_provider: str = "gemini"  # gemini | wanx | minimax | qwen | flux
     tts_provider: str = "gemini"  # gemini | qwen | minimax | fish_speech
     music_provider: str = "suno"  # suno | minimax
     video_provider: str = "veo"  # veo | wanx | minimax
 
     # === LLM - Google Gemini (原生 API，主力) ===
-    # 可用模型: gemini-3-pro-preview | gemini-3-flash-preview | gemini-2.5-flash
+    # 可用模型: gemini-3-flash-preview | gemini-3.1-pro-preview | gemini-2.5-flash
     google_api_key: str = ""
     google_model: str = "gemini-3-flash-preview"
 
@@ -36,13 +36,13 @@ class Settings(BaseSettings):
     # - anthropic/claude-4.5-sonnet (最新最强，推荐)
     # - anthropic/claude-4.5-opus (最强推理)
     # - google/gemini-2.5-flash (快速便宜)
-    # - google/gemini-3-pro-preview (Gemini 3 预览)
+    # - google/gemini-3.1-pro-preview (Gemini 3.1 Pro)
     # - openai/gpt-5 (OpenAI 旗舰)
     # - x-ai/grok-4.1-fast (Grok 4.1)
     # - deepseek/deepseek-chat-v3-0324 (DeepSeek V3，便宜)
     openrouter_api_key: str = ""
     openrouter_model: str = "anthropic/claude-4.5-sonnet"
-    openrouter_site_url: str = "https://example.com"
+    openrouter_site_url: str = "https://kids.jackverse.cn"
     openrouter_site_name: str = "Kids Early Education"
 
     # === 阿里云 DashScope (Qwen 系列 + 万相) ===
@@ -90,18 +90,13 @@ class Settings(BaseSettings):
     suno_api_base: str = "https://api.sunoapi.org"
     suno_model: str = "V5"
 
-    # === Google Gemini 图像生成 (Nano Banana Pro，主力) ===
-    gemini_image_model: str = "gemini-3-pro-image-preview"
+    # === Google Gemini 图像生成 (Nano Banana 2，主力) ===
+    gemini_image_model: str = "gemini-3.1-flash-image-preview"
 
     # === Google Gemini TTS (语音合成，主力) ===
-    gemini_tts_model: str = "gemini-2.5-flash-preview-tts"
+    # Pro 比 Flash 更稳定，对拟声词/特殊文本的处理更好，成本差异微乎其微
+    gemini_tts_model: str = "gemini-2.5-pro-preview-tts"
     gemini_tts_voice: str = "Kore"  # 默认音色，适合儿童内容
-
-    # === Google Imagen 4 (图片生成，备选) ===
-    # Available models: imagen-4.0-generate-001, imagen-4.0-fast-generate-001, imagen-4.0-ultra-generate-001
-    # fast: faster generation, good for batch operations
-    # ultra: higher quality, better prompt alignment
-    imagen_model: str = "imagen-4.0-fast-generate-001"
 
     # === Google Veo 3.1 (视频生成，主力) ===
     # Available: veo-3.1-generate-preview (standard), veo-3.1-fast-generate-preview (fast)
@@ -115,7 +110,7 @@ class Settings(BaseSettings):
 
     # Local storage (recommended for personal use)
     storage_local_path: str = "/var/www/kids/media"
-    storage_base_url: str = "https://example.com/media"
+    storage_base_url: str = "https://kids.jackverse.cn/media"
 
     # Aliyun OSS (for production scale)
     oss_access_key: str = ""
@@ -134,6 +129,22 @@ class Settings(BaseSettings):
     jwt_refresh_token_expire_days: int = 7
 
     # === App settings ===
+    # Security and runtime
+    jwt_secret_min_length: int = 32
+    allowed_cors_origins: list[str] = ["https://kids.jackverse.cn"]
+    cors_allow_credentials: bool = False
+    auto_init_db: bool = False
+
+    # Task status persistence
+    task_status_ttl_seconds: int = 30 * 60
+    task_status_cleanup_interval_seconds: int = 5 * 60
+    task_status_max_finished: int = 100
+
+    # Sharing / admin config
+    admin_openid: str = "admin_web_panel"
+    admin_nickname: str = "管理员"
+    mock_login_enabled: bool = False
+
     debug: bool = False
 
 

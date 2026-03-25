@@ -41,10 +41,10 @@ class ContentResponse(BaseModel):
 
 @router.get("/favorites")
 async def get_favorites(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
-    current_user: Annotated[User, Depends(get_current_user)] = None,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> dict:
     """Get user's favorite content."""
     # Get favorites with content
@@ -90,8 +90,8 @@ async def get_favorites(
 @router.post("/favorites")
 async def add_favorite(
     request: FavoriteRequest,
-    current_user: Annotated[User, Depends(get_current_user)] = None,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Add content to favorites."""
     # Check if content exists
@@ -139,8 +139,8 @@ class CheckFavoriteResponse(BaseModel):
 @router.get("/favorites/check/{content_id}")
 async def check_favorite(
     content_id: str,
-    current_user: Annotated[User, Depends(get_current_user)] = None,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CheckFavoriteResponse:
     """Check if content is favorited by current user."""
     result = await db.execute(
@@ -160,8 +160,8 @@ async def check_favorite(
 @router.delete("/favorites/{content_id}")
 async def remove_favorite(
     content_id: str,
-    current_user: Annotated[User, Depends(get_current_user)] = None,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Remove content from favorites."""
     result = await db.execute(
@@ -187,8 +187,8 @@ async def remove_favorite(
 @router.post("/share")
 async def create_share(
     request: ShareRequest,
-    current_user: Annotated[User, Depends(get_current_user)] = None,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Create a share for content."""
     # Check if content exists
@@ -230,7 +230,7 @@ async def create_share(
 @router.get("/share/{share_code}")
 async def get_share(
     share_code: str,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Get share by code (public endpoint)."""
     share_service = ShareService()
@@ -266,10 +266,10 @@ async def get_share(
 
 @router.get("/my-shares")
 async def get_my_shares(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
-    current_user: Annotated[User, Depends(get_current_user)] = None,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> dict:
     """Get user's shares."""
     share_service = ShareService()
