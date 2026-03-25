@@ -58,10 +58,8 @@ npm install
 首次开发需要配置微信小程序 AppID：
 
 ```bash
-# 复制配置模板
-cp project.config.json.template project.config.json
-cp project.private.config.json.template project.private.config.json
-cp src/manifest.json.template src/manifest.json
+# 自动补齐本地配置模板（只在缺文件时创建，不会覆盖已有配置）
+npm run ensure:public-config
 
 # 编辑以下文件，将 YOUR_WECHAT_APPID_HERE 替换为你的 AppID
 # - project.config.json
@@ -69,6 +67,8 @@ cp src/manifest.json.template src/manifest.json
 ```
 
 详细配置说明请查看 [敏感配置指南](README.sensitive-config.md)
+
+`npm run dev:mp-weixin` 和 `npm run build:mp-weixin` 会先自动执行一次 `npm run ensure:public-config`，确保首次下载仓库后可以直接本地编译；如果你已经填过自己的配置，脚本不会覆盖已有文件。
 
 ### 开发模式
 

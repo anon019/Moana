@@ -24,15 +24,18 @@
 # 在 miniprogram 目录下执行
 cd miniprogram
 
-# 复制配置模板
-cp project.config.json.template project.config.json
-cp project.private.config.json.template project.private.config.json
-cp src/manifest.json.template src/manifest.json
+# 自动补齐缺失的本地配置文件
+npm run ensure:public-config
 
 # 使用你喜欢的编辑器修改 AppID
 # 1. 编辑 project.config.json，将 YOUR_WECHAT_APPID_HERE 替换为真实 AppID
 # 2. 编辑 src/manifest.json，将 mp-weixin.appid 的 YOUR_WECHAT_APPID_HERE 替换为真实 AppID
 ```
+
+说明：
+- `npm run ensure:public-config` 只会在文件不存在时从模板创建
+- 已有的 `project.config.json`、`project.private.config.json`、`src/manifest.json` 不会被覆盖
+- `npm run dev:mp-weixin` 和 `npm run build:mp-weixin` 会自动先执行这一步
 
 ### 重要提示
 
