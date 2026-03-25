@@ -227,7 +227,7 @@ async def get_style_options():
 # ========== TTS Voices API ==========
 
 # 预览音频 URL 基础路径（存储服务会自动处理路径）
-VOICE_PREVIEW_BASE_URL = "https://kids.jackverse.cn/media/voice-preview"
+VOICE_PREVIEW_BASE_URL = f"{get_settings().storage_base_url.rstrip('/')}/voice-preview"
 
 
 @router.get("/tts/voices")

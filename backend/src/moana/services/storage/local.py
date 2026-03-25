@@ -57,7 +57,7 @@ class LocalStorageService(StorageService):
         self.base_url = (
             base_url
             or getattr(settings, "storage_base_url", None)
-            or "https://kids.jackverse.cn/media"
+            or "http://localhost:8080/media"
         ).rstrip("/")
 
         self.storage_path.mkdir(parents=True, exist_ok=True)

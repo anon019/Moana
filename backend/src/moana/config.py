@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # - deepseek/deepseek-chat-v3-0324 (DeepSeek V3，便宜)
     openrouter_api_key: str = ""
     openrouter_model: str = "anthropic/claude-4.5-sonnet"
-    openrouter_site_url: str = "https://kids.jackverse.cn"
+    openrouter_site_url: str = "http://localhost:3000"
     openrouter_site_name: str = "Kids Early Education"
 
     # === 阿里云 DashScope (Qwen 系列 + 万相) ===
@@ -110,7 +110,8 @@ class Settings(BaseSettings):
 
     # Local storage (recommended for personal use)
     storage_local_path: str = "/var/www/kids/media"
-    storage_base_url: str = "https://kids.jackverse.cn/media"
+    storage_base_url: str = "http://localhost:8080/media"
+    callback_base_url: str = "http://localhost:8080"
 
     # Aliyun OSS (for production scale)
     oss_access_key: str = ""
@@ -131,7 +132,7 @@ class Settings(BaseSettings):
     # === App settings ===
     # Security and runtime
     jwt_secret_min_length: int = 32
-    allowed_cors_origins: list[str] = ["https://kids.jackverse.cn"]
+    allowed_cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     cors_allow_credentials: bool = False
     auto_init_db: bool = False
 

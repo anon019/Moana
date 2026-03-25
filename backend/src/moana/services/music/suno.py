@@ -87,7 +87,7 @@ class SunoMusicService(BaseMusicService):
         self._api_base = settings.suno_api_base
         self._model = settings.suno_model
         # 回调 URL - 用于通知前端进度
-        self._callback_base = getattr(settings, 'callback_base_url', 'https://example.com')
+        self._callback_base = getattr(settings, 'callback_base_url', 'http://localhost:8080')
 
     @property
     def provider_name(self) -> str:

@@ -1,6 +1,6 @@
 Alembic migrations for the Moana backend.
 
-Apply the latest schema:
+Apply the latest schema before starting or restarting the backend:
 
 ```bash
 alembic upgrade head
@@ -12,4 +12,12 @@ Create a new revision:
 alembic revision -m "describe change"
 ```
 
-Migration files are stored in `alembic/versions/`. Recent revisions include play history and interaction tracking tables used by the backend learning flow.
+Migration files are stored in `alembic/versions/`.
+
+Recent revisions cover:
+
+- play history and interaction tracking tables
+- task status persistence
+- child settings compatibility fields
+
+This directory is published to the public monorepo under `backend/alembic/`.

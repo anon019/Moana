@@ -92,15 +92,35 @@ export interface ContentListResponse {
 }
 
 // 学习统计
-export interface LearningStats {
+export interface LearningStatsPeriod {
+  start_date: string
+  end_date: string
+  days: number
+}
+
+export interface LearningStatsSummary {
   total_duration_minutes: number
   total_books: number
   total_songs: number
   total_videos: number
   streak_days: number
-  daily_activity: Array<{
-    date: string
-    has_activity: boolean
-    duration_minutes: number
-  }>
+  interaction_rate: number
+}
+
+export interface LearningStatsDailyActivity {
+  date: string
+  duration_minutes: number
+  contents_count: number
+}
+
+export interface LearningStatsThemeStat {
+  theme: string
+  count: number
+}
+
+export interface LearningStats {
+  period: LearningStatsPeriod
+  summary: LearningStatsSummary
+  daily_activity: LearningStatsDailyActivity[]
+  top_themes: LearningStatsThemeStat[]
 }

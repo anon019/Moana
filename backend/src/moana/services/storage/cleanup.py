@@ -81,7 +81,7 @@ class OrphanFileCleanup:
         self.base_url = (
             base_url
             or getattr(settings, "storage_base_url", None)
-            or "https://kids.jackverse.cn/media"
+            or "http://localhost:8080/media"
         ).rstrip("/")
 
         self.min_age_hours = min_age_hours
@@ -94,7 +94,7 @@ class OrphanFileCleanup:
         """Convert a full URL to storage key.
 
         Example:
-            https://kids.jackverse.cn/media/images/2024/12/18/abc123.jpg
+            http://localhost:8080/media/images/2024/12/18/abc123.jpg
             -> images/2024/12/18/abc123.jpg
         """
         if not url:

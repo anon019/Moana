@@ -26,11 +26,13 @@ class GoogleVeoService(BaseVideoService):
 
     def __init__(self):
         settings = get_settings()
-        self._api_key = settings.google_api_key
+        from moana.services.gemini_client import get_gemini_client
         self._model = settings.veo_model
         self._resolution = settings.veo_resolution
         self._default_duration = settings.veo_duration
-        self._client = genai.Client(api_key=self._api_key)
+        self._client = get_gemini_client()
+        self._storage_base_url = settings.storage_base_url.rstrip('/') + '/'
+        self._storage_local_path = settings.storage_local_path.rstrip('/') + '/'
 
         # Enhancement systems
         self._prompt_enhancer = VeoPromptEnhancer()
@@ -179,13 +181,10 @@ class GoogleVeoService(BaseVideoService):
         如果 URL 是本地存储的图片，直接读取本地文件避免网络问题。
         """
         # 检查是否是本地存储的图片
-        local_base_url = "https://example.com/media/"
-        local_storage_path = "/var/www/kids/media/"
-
-        if image_url.startswith(local_base_url):
+        if image_url.startswith(self._storage_base_url):
             # 转换为本地路径
-            relative_path = image_url.replace(local_base_url, "")
-            local_path = local_storage_path + relative_path
+            relative_path = image_url.replace(self._storage_base_url, "")
+            local_path = f"{self._storage_local_path}{relative_path}"
 
             logger.info(f"Reading local image: {local_path}")
             try:

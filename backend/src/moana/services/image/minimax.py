@@ -1,7 +1,7 @@
 # src/moana/services/image/minimax.py
 """MiniMax image generation service implementation.
 
-生成的图片会自动保存到本地存储（example.com），
+生成的图片会自动保存到配置的媒体存储地址，
 避免微信小程序的合法域名限制问题。
 """
 import hashlib
@@ -113,7 +113,7 @@ class MiniMaxImageService(BaseImageService):
             prompt: 原始提示词（用于生成唯一文件名）
 
         Returns:
-            本地存储 URL (https://example.com/media/images/...)
+            本地存储 URL (配置的 media 地址，例如 /media/images/...)
         """
         # 下载图片文件
         async with httpx.AsyncClient(timeout=60.0) as client:

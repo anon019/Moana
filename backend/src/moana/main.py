@@ -32,7 +32,7 @@ allowed_origins = [
     origin
     for origin in settings.allowed_cors_origins
     if not (settings.cors_allow_credentials and origin == "*")
-] or ["https://kids.jackverse.cn"]
+] or ["http://localhost:3000", "http://127.0.0.1:3000"]
 
 
 async def _periodic_task_cleanup(interval_seconds: int):
