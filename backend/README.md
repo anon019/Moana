@@ -48,6 +48,7 @@ Key settings include:
 - `TTS_PROVIDER`
 - `MUSIC_PROVIDER`
 - `VIDEO_PROVIDER`
+- `GEMINI_IMAGE_MODEL`
 - `STORAGE_BASE_URL`
 - `CALLBACK_BASE_URL`
 - `ALLOWED_CORS_ORIGINS`
@@ -105,5 +106,6 @@ pytest tests/api/test_play.py -q
 ## Notes
 
 - Keep secrets in local `.env` files only. Do not commit provider keys, private data, or production hosts.
+- The default image generation path uses Gemini with `GEMINI_IMAGE_MODEL=gemini-3.1-flash-image-preview` (documented in the codebase as the Nano Banana image model).
 - This directory is the backend codebase. In the public monorepo, it is synced into `backend/`.
 - The public version intentionally keeps runtime URLs configurable and avoids hardcoded deployment-specific domains.

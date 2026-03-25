@@ -104,7 +104,7 @@ Moana 是一个 **AI 原生** 的早期教育内容生成平台，专为 1-6 岁
 ├─────────────────────────────────────────────────────────────────┤
 │  LLM          │  图像生成      │  TTS         │  音乐/视频        │
 │  ────────     │  ──────────    │  ────────    │  ────────────     │
-│  OpenRouter   │  Gemini Image  │  Gemini TTS  │  Suno / MiniMax   │
+│  OpenRouter   │ Gemini Nano Banana │  Gemini TTS  │  Suno / MiniMax   │
 │  Gemini       │  通义万相      │  Qwen TTS    │  Google Veo 3.1   │
 │  Claude       │  MiniMax       │  MiniMax TTS │  万相视频         │
 └─────────────────────────────────────────────────────────────────┘
@@ -133,7 +133,7 @@ Moana 是一个 **AI 原生** 的早期教育内容生成平台，专为 1-6 岁
 
 | 类别 | 首选服务 | 备选服务 | 环境变量 |
 |------|----------|----------|----------|
-| **图片生成** | Gemini Image / 通义万相 | MiniMax、Flux | `IMAGE_PROVIDER` |
+| **图片生成** | Gemini Nano Banana (`gemini-3.1-flash-image-preview`) / 通义万相 | MiniMax、Flux | `IMAGE_PROVIDER` |
 | **儿歌生成** | Suno V5 | MiniMax Music 2.0 | `MUSIC_PROVIDER` |
 | **视频生成** | Google Veo 3.1 / 阿里云万相 | MiniMax Hailuo | `VIDEO_PROVIDER` |
 | **LLM** | OpenRouter | Gemini、Claude | `LLM_PROVIDER` |
@@ -216,6 +216,7 @@ DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/moana
 # Provider keys
 OPENROUTER_API_KEY=your_openrouter_api_key
 GOOGLE_API_KEY=your_google_api_key
+GEMINI_IMAGE_MODEL=gemini-3.1-flash-image-preview
 SUNO_API_KEY=your_suno_api_key
 DASHSCOPE_API_KEY=your_dashscope_api_key
 MINIMAX_API_KEY=your_minimax_api_key
@@ -230,6 +231,7 @@ OPENROUTER_SITE_URL=http://localhost:3000
 原则：
 
 - 不要把生产域名、密钥或私有地址提交到仓库
+- 图片生成默认链路使用 Gemini，模型为 `gemini-3.1-flash-image-preview`（代码注释标为 Nano Banana）
 - 存储地址、回调地址、CORS 白名单全部通过环境变量配置
 - 公开仓库中的默认值仅用于本地开发示例
 
