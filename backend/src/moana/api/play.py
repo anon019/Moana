@@ -262,17 +262,31 @@ def _coerce_date(value: object | None) -> date | None:
     return None
 
 
-def _session_duration_minutes_expr():
+def _normalize_cursor_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _session_duration_minutes_expr(dialect_name: str):
     # Keep duration aggregation in SQL so learning-stats does not scan every
     # session row in Python for common date-range requests.
-    duration_seconds = func.extract(
-        "epoch",
-        func.coalesce(
-            PlayHistory.completed_at,
-            PlayHistory.last_played_at,
-            PlayHistory.started_at,
-        ) - PlayHistory.started_at,
+    end_time = func.coalesce(
+        PlayHistory.completed_at,
+        PlayHistory.last_played_at,
+        PlayHistory.started_at,
     )
+
+    if dialect_name == "sqlite":
+        duration_seconds = (
+            func.strftime("%s", end_time) - func.strftime("%s", PlayHistory.started_at)
+        )
+        return cast(
+            case((duration_seconds > 0, duration_seconds / 60), else_=0),
+            Integer,
+        )
+
+    duration_seconds = func.extract("epoch", end_time - PlayHistory.started_at)
     return cast(func.greatest(duration_seconds, 0) / 60, Integer)
 
 
@@ -477,7 +491,12 @@ async def get_play_history(
     if content_type:
         base_filters.append(PlayHistory.content_type == content_type)
 
+    dialect_name = db.bind.dialect.name if getattr(db, "bind", None) is not None else ""
+    use_python_cursor = bool(cursor and dialect_name == "sqlite")
+
     page_filters = list(base_filters)
+    cursor_ts = None
+    cursor_id = None
     if cursor:
         try:
             cursor_ts, cursor_id = _decode_play_history_cursor(cursor)
@@ -486,15 +505,18 @@ async def get_play_history(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid cursor format. expected iso_datetime|history_id",
             ) from exc
-        page_filters.append(
-            or_(
-                PlayHistory.last_played_at < cursor_ts,
-                and_(
-                    PlayHistory.last_played_at == cursor_ts,
-                    PlayHistory.id < cursor_id,
-                ),
+
+        if not use_python_cursor:
+            query_cursor_ts = cursor_ts
+            page_filters.append(
+                or_(
+                    PlayHistory.last_played_at < query_cursor_ts,
+                    and_(
+                        PlayHistory.last_played_at == query_cursor_ts,
+                        PlayHistory.id < cursor_id,
+                    ),
+                )
             )
-        )
 
     count_result = await db.execute(
         select(func.count()).select_from(PlayHistory).where(*base_filters)
@@ -503,18 +525,34 @@ async def get_play_history(
 
     query = (
         select(PlayHistory)
-        .where(*page_filters)
+        .where(*(base_filters if use_python_cursor else page_filters))
         .order_by(
             PlayHistory.last_played_at.desc(),
             PlayHistory.id.desc(),
         )
-        .limit(limit + 1)
     )
+    if not use_python_cursor:
+        query = query.limit(limit + 1)
     if offset:
         query = query.offset(offset)
 
     result = await db.execute(query)
     records = list(result.scalars().all())
+
+    if use_python_cursor and cursor_ts is not None and cursor_id is not None:
+        normalized_cursor_ts = _normalize_cursor_datetime(cursor_ts)
+        records = [
+            record
+            for record in records
+            if (
+                _normalize_cursor_datetime(record.last_played_at) < normalized_cursor_ts
+                or (
+                    _normalize_cursor_datetime(record.last_played_at) == normalized_cursor_ts
+                    and record.id < cursor_id
+                )
+            )
+        ]
+        records = records[: limit + 1]
 
     next_cursor = None
     has_more = len(records) > limit
@@ -684,7 +722,7 @@ async def get_learning_stats(
     start_date = today - timedelta(days=days - 1)
     start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
 
-    duration_minutes_expr = _session_duration_minutes_expr()
+    duration_minutes_expr = _session_duration_minutes_expr(db.bind.dialect.name)
     activity_date_expr = func.date(PlayHistory.started_at).label("activity_date")
 
     daily_result = await db.execute(

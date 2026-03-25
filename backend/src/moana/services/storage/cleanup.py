@@ -15,15 +15,14 @@ Usage:
     result = await cleanup.scan_and_clean(dry_run=True)
 """
 import asyncio
+import json
 import logging
-import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 
 from moana.config import get_settings
 from moana.database import async_session_factory
@@ -35,6 +34,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CleanupResult:
     """Result of cleanup operation."""
+
     scanned_files: int = 0
     referenced_files: int = 0
     orphan_files: int = 0
@@ -57,8 +57,8 @@ class CleanupResult:
             "failed_deletions": self.failed_deletions,
             "dry_run": self.dry_run,
             "duration_seconds": round(self.duration_seconds, 2),
-            "orphan_file_list": self.orphan_file_list[:100],  # Limit to 100 for display
-            "errors": self.errors[:20],  # Limit errors
+            "orphan_file_list": self.orphan_file_list[:100],  # Limit for display
+            "errors": self.errors[:20],
         }
 
 
@@ -71,14 +71,6 @@ class OrphanFileCleanup:
         base_url: Optional[str] = None,
         min_age_hours: int = 24,
     ):
-        """Initialize cleanup service.
-
-        Args:
-            storage_path: Path to local storage (from config if not specified)
-            base_url: Base URL for files (from config if not specified)
-            min_age_hours: Only consider files older than this many hours as orphans.
-                          This prevents deleting files that are still being generated.
-        """
         settings = get_settings()
 
         self.storage_path = Path(
@@ -89,7 +81,7 @@ class OrphanFileCleanup:
         self.base_url = (
             base_url
             or getattr(settings, "storage_base_url", None)
-            or "https://example.com/media"
+            or "https://kids.jackverse.cn/media"
         ).rstrip("/")
 
         self.min_age_hours = min_age_hours
@@ -102,26 +94,90 @@ class OrphanFileCleanup:
         """Convert a full URL to storage key.
 
         Example:
-            https://example.com/media/images/2024/12/18/abc123.jpg
+            https://kids.jackverse.cn/media/images/2024/12/18/abc123.jpg
             -> images/2024/12/18/abc123.jpg
         """
         if not url:
             return None
 
-        # Handle both full URLs and relative paths
-        if url.startswith(self.base_url):
-            return url[len(self.base_url):].lstrip("/")
-        elif url.startswith("/media/"):
-            return url[7:]  # Remove /media/ prefix
-        elif not url.startswith("http"):
-            # Already a key or relative path
-            return url.lstrip("/")
+        clean = url.strip()
+        if not clean:
+            return None
 
-        return None
+        # Strip query and fragment parts for stable matching.
+        clean = clean.split("?", 1)[0].split("#", 1)[0]
+
+        if clean.startswith(self.base_url):
+            clean = clean[len(self.base_url):].lstrip("/")
+        elif clean.startswith("/media/"):
+            clean = clean[7:]
+        elif clean.startswith("/"):
+            clean = clean[1:]
+
+        if clean.startswith("http://") or clean.startswith("https://"):
+            return None
+
+        return clean or None
+
+    def _is_url_field(self, field_name: Any) -> bool:
+        return isinstance(field_name, str) and (
+            field_name == "url" or field_name.endswith("_url")
+        )
+
+    @staticmethod
+    def _looks_like_url(value: str) -> bool:
+        normalized = value.split("?", 1)[0].split("#", 1)[0]
+        return (
+            normalized.startswith("http://")
+            or normalized.startswith("https://")
+            or normalized.startswith("/")
+            or "/" in normalized
+        )
+
+    def _extract_urls_from_content_data(self, content_data: Any) -> set[str]:
+        """Recursively extract all URL-like string fields from arbitrary JSON content."""
+        keys: set[str] = set()
+
+        # Some DB backends may return JSON as str
+        if isinstance(content_data, (bytes, bytearray)):
+            try:
+                content_data = content_data.decode("utf-8")
+            except Exception:
+                return keys
+        if isinstance(content_data, str):
+            try:
+                content_data = json.loads(content_data)
+            except Exception:
+                return keys
+
+        def walk(node: Any) -> None:
+            if isinstance(node, dict):
+                for field_name, value in node.items():
+                    if isinstance(value, str):
+                        if self._is_url_field(field_name):
+                            key = self._url_to_key(value)
+                            if key:
+                                keys.add(key)
+                    elif isinstance(value, dict | list):
+                        walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    if isinstance(item, (dict, list)):
+                        walk(item)
+                    elif isinstance(item, str):
+                        if self._looks_like_url(item):
+                            key = self._url_to_key(item)
+                            if key:
+                                keys.add(key)
+
+        if isinstance(content_data, (dict, list)):
+            walk(content_data)
+
+        return keys
 
     async def _get_referenced_keys_from_db(self) -> set[str]:
         """Extract all referenced file keys from database content_data."""
-        referenced_keys = set()
+        referenced_keys: set[str] = set()
 
         async with async_session_factory() as db:
             # Query all content_data JSON
@@ -132,8 +188,7 @@ class OrphanFileCleanup:
 
             for row in rows:
                 content_data = row[0] if row[0] else {}
-                keys = self._extract_urls_from_content_data(content_data)
-                referenced_keys.update(keys)
+                referenced_keys.update(self._extract_urls_from_content_data(content_data))
 
             # Also check content_assets table
             result = await db.execute(
@@ -147,83 +202,24 @@ class OrphanFileCleanup:
 
         return referenced_keys
 
-    def _extract_urls_from_content_data(self, content_data: dict) -> set[str]:
-        """Recursively extract all URL keys from content_data JSON."""
-        keys = set()
-
-        if not isinstance(content_data, dict):
-            return keys
-
-        # Known URL fields
-        url_fields = [
-            "image_url", "audio_url", "video_url",
-            "cover_url", "suno_cover_url", "thumbnail_url",
-        ]
-
-        for field_name in url_fields:
-            url = content_data.get(field_name)
-            if url:
-                key = self._url_to_key(url)
-                if key:
-                    keys.add(key)
-
-        # Handle nested structures
-        # pages array (picture_book)
-        pages = content_data.get("pages", [])
-        if isinstance(pages, list):
-            for page in pages:
-                if isinstance(page, dict):
-                    for field_name in url_fields:
-                        url = page.get(field_name)
-                        if url:
-                            key = self._url_to_key(url)
-                            if key:
-                                keys.add(key)
-
-        # clips array (video)
-        clips = content_data.get("clips", [])
-        if isinstance(clips, list):
-            for clip in clips:
-                if isinstance(clip, dict):
-                    for field_name in url_fields:
-                        url = clip.get(field_name)
-                        if url:
-                            key = self._url_to_key(url)
-                            if key:
-                                keys.add(key)
-
-        # all_tracks array (nursery_rhyme)
-        all_tracks = content_data.get("all_tracks", [])
-        if isinstance(all_tracks, list):
-            for track in all_tracks:
-                if isinstance(track, dict):
-                    for field_name in ["audio_url", "video_url", "cover_url"]:
-                        url = track.get(field_name)
-                        if url:
-                            key = self._url_to_key(url)
-                            if key:
-                                keys.add(key)
-
-        return keys
-
     def _get_local_files(self) -> list[tuple[str, int, datetime]]:
         """Scan local storage and return list of (key, size_bytes, mtime)."""
         files = []
-        categories = ["images", "audio", "video", "files"]
 
-        for category in categories:
-            category_path = self.storage_path / category
-            if category_path.exists():
-                for file_path in category_path.rglob("*"):
-                    if file_path.is_file():
-                        try:
-                            stat = file_path.stat()
-                            # Get relative key
-                            key = str(file_path.relative_to(self.storage_path))
-                            mtime = datetime.fromtimestamp(stat.st_mtime)
-                            files.append((key, stat.st_size, mtime))
-                        except Exception as e:
-                            logger.warning(f"Error reading file {file_path}: {e}")
+        if not self.storage_path.exists():
+            return files
+
+        for file_path in self.storage_path.rglob("*"):
+            if not file_path.is_file():
+                continue
+
+            try:
+                stat = file_path.stat()
+                key = str(file_path.relative_to(self.storage_path))
+                mtime = datetime.fromtimestamp(stat.st_mtime)
+                files.append((key, stat.st_size, mtime))
+            except Exception as e:
+                logger.warning(f"Error reading file {file_path}: {e}")
 
         return files
 
@@ -261,34 +257,26 @@ class OrphanFileCleanup:
             logger.info(f"Found {result.scanned_files} files in local storage")
 
             # Step 3: Find orphans
-            orphan_files = []
             for key, size, mtime in local_files:
-                if key not in referenced_keys and mtime < cutoff_time:
-                    orphan_files.append((key, size))
+                if key in referenced_keys or mtime >= cutoff_time:
+                    continue
+
+                result.orphan_files += 1
+                if len(result.orphan_file_list) < 100:
                     result.orphan_file_list.append(key)
+                result.deleted_bytes += size
 
-            result.orphan_files = len(orphan_files)
-            logger.info(f"Found {result.orphan_files} orphan files (older than {min_age}h)")
-
-            # Step 4: Delete orphans (if not dry run)
-            if not dry_run and orphan_files:
-                logger.info("Deleting orphan files...")
-                for key, size in orphan_files:
+                if not dry_run:
                     try:
                         deleted = await self.storage_service.delete_file(key)
                         if deleted:
                             result.deleted_files += 1
-                            result.deleted_bytes += size
                         else:
                             result.failed_deletions += 1
                             result.errors.append(f"Failed to delete: {key}")
                     except Exception as e:
                         result.failed_deletions += 1
                         result.errors.append(f"Error deleting {key}: {str(e)}")
-            elif dry_run:
-                # In dry run, report what would be deleted
-                for key, size in orphan_files:
-                    result.deleted_bytes += size
 
         except Exception as e:
             logger.exception(f"Cleanup failed: {e}")

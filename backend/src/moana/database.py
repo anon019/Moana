@@ -18,11 +18,15 @@ def get_engine() -> AsyncEngine:
         settings.database_url,
         echo=settings.debug,
         pool_pre_ping=True,
+        pool_size=3,
+        max_overflow=2,
+        pool_recycle=1800,
     )
 
 
+@lru_cache
 def get_session_factory() -> async_sessionmaker[AsyncSession]:
-    """Get async session factory."""
+    """Get cached async session factory."""
     return async_sessionmaker(
         get_engine(),
         class_=AsyncSession,
@@ -36,7 +40,8 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     async with factory() as session:
         try:
             yield session
-            await session.commit()
+            if session.dirty or session.new or session.deleted:
+                await session.commit()
         except Exception:
             await session.rollback()
             raise
@@ -63,5 +68,5 @@ async def drop_db() -> None:
 # Alias for FastAPI dependency
 get_db = get_async_session
 
-# 导出 session factory 供后台任务使用
+# Export session factory for background jobs
 async_session_factory = get_session_factory()

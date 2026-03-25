@@ -3,8 +3,11 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from moana.config import get_settings
 from moana.database import get_db
 from moana.models.user import User
 from moana.schemas.auth import (
@@ -13,7 +16,7 @@ from moana.schemas.auth import (
     RefreshTokenRequest,
     UserResponse,
 )
-from moana.services.wechat import WeChatService, WeChatError
+from moana.services.wechat import WeChatError, WeChatService
 from moana.utils.security import (
     create_access_token,
     create_refresh_token,
@@ -32,24 +35,26 @@ async def get_or_create_user(
     avatar_url: Optional[str] = None,
 ) -> User:
     """Get existing user or create new one."""
-    from sqlalchemy import select
-
-    # Try to find existing user
     result = await db.execute(select(User).where(User.openid == openid))
     user = result.scalar_one_or_none()
 
     if user:
-        # Update user info if changed
+        updated = False
         if nickname and user.nickname != nickname:
             user.nickname = nickname
+            updated = True
         if avatar_url and user.avatar_url != avatar_url:
             user.avatar_url = avatar_url
+            updated = True
         if unionid and not user.unionid:
             user.unionid = unionid
-        await db.commit()
+            updated = True
+
+        if updated:
+            await db.commit()
+            await db.refresh(user)
         return user
 
-    # Create new user
     user = User(
         openid=openid,
         unionid=unionid,
@@ -57,9 +62,18 @@ async def get_or_create_user(
         avatar_url=avatar_url,
     )
     db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
+    try:
+        await db.commit()
+        await db.refresh(user)
+        return user
+    except IntegrityError:
+        await db.rollback()
+        # Another request created the same user concurrently.
+        result = await db.execute(select(User).where(User.openid == openid))
+        concurrent_user = result.scalar_one_or_none()
+        if concurrent_user is not None:
+            return concurrent_user
+        raise
 
 
 async def get_current_user(
@@ -67,8 +81,6 @@ async def get_current_user(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
     """Get current user from JWT token."""
-    from sqlalchemy import select
-
     token = credentials.credentials
     payload = decode_access_token(token)
 
@@ -98,12 +110,13 @@ async def get_current_user(
 
 
 async def get_current_user_optional(
+    db: Annotated[AsyncSession, Depends(get_db)],
     authorization: Annotated[str | None, Header()] = None,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> User | None:
     """Get current user if authenticated, otherwise return None."""
     if not authorization:
         return None
+
     try:
         # Extract token from "Bearer <token>" format
         if authorization.startswith("Bearer "):
@@ -156,8 +169,6 @@ async def refresh_token(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TokenResponse:
     """Refresh access token."""
-    from sqlalchemy import select
-
     payload = decode_access_token(request.refresh_token)
 
     if not payload:
@@ -196,13 +207,17 @@ async def mock_login(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TokenResponse:
     """Mock login for admin panel (development/internal use)."""
-    # Use a fixed admin user for the web admin panel
-    ADMIN_OPENID = "admin_web_panel"
+    settings = get_settings()
+    if not settings.mock_login_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Mock login is disabled",
+        )
 
     user = await get_or_create_user(
         db,
-        openid=ADMIN_OPENID,
-        nickname="管理员",
+        openid=settings.admin_openid,
+        nickname=settings.admin_nickname,
     )
 
     access_token = create_access_token(data={"sub": user.id})

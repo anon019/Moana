@@ -1,12 +1,14 @@
 # src/moana/api/content.py
 import asyncio
+import json
 import logging
+import time
 from datetime import datetime
 from typing import Annotated, Optional, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Response
-from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select, desc, literal_column, text
+from pydantic import BaseModel, Field, field_validator, model_validator
+from sqlalchemy import select, desc, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import uuid4
 
@@ -16,6 +18,8 @@ from moana.pipelines.picture_book import PictureBookPipeline
 from moana.pipelines.nursery_rhyme import NurseryRhymePipeline
 from moana.pipelines.video import VideoPipeline
 from moana.services.music.base import MusicStyle
+from moana.config import get_settings
+from moana.services.task_status_cache import TaskStatusCache
 from moana.themes import get_themes_by_category, Theme
 
 logger = logging.getLogger(__name__)
@@ -23,8 +27,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ========== 异步任务状态存储 ==========
-# 生产环境应使用 Redis
-_task_status: dict[str, dict[str, Any]] = {}
+_TASK_STATUS_TYPE = "content"
+_task_status = TaskStatusCache(task_type=_TASK_STATUS_TYPE)
+
+
+async def _cleanup_task_status() -> int:
+    """清理数据库中的过期任务状态并同步内存缓存."""
+    settings = get_settings()
+    return await _task_status.cleanup(
+        ttl_seconds=settings.task_status_ttl_seconds,
+        max_finished=settings.task_status_max_finished,
+    )
+
+
+# ========== 并发生成队列保护 ==========
+# 限制同时进行的内容生成任务数量（服务器仅 2GB 内存）
+_GENERATION_SEMAPHORE = asyncio.Semaphore(2)
 
 
 # ========== Content List API ==========
@@ -61,30 +79,26 @@ async def list_contents(
 
     返回用户生成的内容列表，支持按类型过滤和分页。
     """
-    # Build query - use literal_column to bypass ORM enum conversion
-    ready_status = literal_column("'ready'")
-    query = select(Content).where(Content.status == ready_status)
+    # Build query
+    query = select(Content).where(Content.status == ContentStatus.READY)
 
+    content_type_filter = None
     if type:
         try:
-            ContentType(type)  # Validate type
-            type_literal = literal_column(f"'{type}'")
-            query = query.where(Content.content_type == type_literal)
+            content_type_filter = ContentType(type)
         except ValueError:
-            pass  # Ignore invalid type filter
+            content_type_filter = None
 
-    # Get total count
-    count_query = select(Content).where(Content.status == ready_status)
-    if type:
-        try:
-            ContentType(type)  # Validate type
-            type_literal = literal_column(f"'{type}'")
-            count_query = count_query.where(Content.content_type == type_literal)
-        except ValueError:
-            pass
+    if content_type_filter is not None:
+        query = query.where(Content.content_type == content_type_filter)
+
+    # Get total count（使用 SQL COUNT 而非全表加载）
+    count_query = select(func.count()).select_from(Content).where(Content.status == ContentStatus.READY)
+    if content_type_filter is not None:
+        count_query = count_query.where(Content.content_type == content_type_filter)
 
     count_result = await db.execute(count_query)
-    total = len(count_result.scalars().all())
+    total = count_result.scalar_one()
 
     # Get paginated results
     query = query.order_by(desc(Content.created_at)).offset(offset).limit(limit)
@@ -130,6 +144,32 @@ async def list_contents(
         total=total,
         has_more=(offset + len(items)) < total,
     )
+
+
+# ========== Content Stats API ==========
+
+class ContentStatsResponse(BaseModel):
+    """各类型内容数量统计."""
+    stats: dict[str, int]
+    total: int
+
+
+@router.get("/stats", response_model=ContentStatsResponse)
+async def get_content_stats(
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """获取各类型内容数量统计.
+
+    单次 GROUP BY 查询，返回各 content_type 的已完成内容数量。
+    """
+    query = (
+        select(Content.content_type, func.count(Content.id))
+        .where(Content.status == ContentStatus.READY)
+        .group_by(Content.content_type)
+    )
+    result = await db.execute(query)
+    stats = {row[0].value if hasattr(row[0], 'value') else str(row[0]): row[1] for row in result.all()}
+    return ContentStatsResponse(stats=stats, total=sum(stats.values()))
 
 
 # ========== Themes API (must be before /{content_id} to avoid route conflict) ==========
@@ -187,7 +227,7 @@ async def get_style_options():
 # ========== TTS Voices API ==========
 
 # 预览音频 URL 基础路径（存储服务会自动处理路径）
-VOICE_PREVIEW_BASE_URL = "https://example.com/media/voice-preview"
+VOICE_PREVIEW_BASE_URL = "https://kids.jackverse.cn/media/voice-preview"
 
 
 @router.get("/tts/voices")
@@ -322,11 +362,11 @@ class StandaloneVideoRequest(BaseModel):
     negative_prompt: str | None = Field(default=None)
     scene_template: str | None = Field(default=None)
 
-    @field_validator('first_frame_url', 'generate_first_frame')
-    @classmethod
-    def validate_first_frame_source(cls, v, info):
-        # At least one source must be provided
-        return v
+    @model_validator(mode="after")
+    def validate_first_frame_source(self):
+        if not self.first_frame_url and not self.generate_first_frame:
+            raise ValueError("Either first_frame_url or generate_first_frame must be provided.")
+        return self
 
 
 @router.post("/video/first-frame", response_model=FirstFrameResponse)
@@ -340,7 +380,7 @@ async def generate_first_frame(request: FirstFrameRequest):
 
     logger.info(f"Generating first frame: {request.prompt[:50]}...")
 
-    # Get image service (uses gemini-3-pro-image-preview)
+    # Get image service (uses gemini-3.1-flash-image-preview)
     image_service = get_image_service()
 
     # Enhance prompt with child name and style
@@ -621,7 +661,7 @@ async def get_asset_details(
     # 获取默认模型名称（用于 fallback 旧数据中的 "unknown"）
     from moana.config import get_settings
     settings = get_settings()
-    default_image_model = settings.gemini_image_model  # "gemini-3-pro-image-preview"
+    default_image_model = settings.gemini_image_model  # "gemini-3.1-flash-image-preview"
     default_tts_model = settings.gemini_tts_model  # "gemini-2.5-flash-preview-tts"
 
     def get_model_name(stored_value: str, default: str) -> str:
@@ -1012,9 +1052,9 @@ async def save_content_to_db(
     duration: Optional[int],
     generated_by: dict,
     child_id: Optional[str] = None,
+    status: str = "ready",
 ) -> str:
     """Save generated content to database using raw SQL to avoid enum issues."""
-    import json
 
     content_id = str(uuid4())
 
@@ -1026,7 +1066,7 @@ async def save_content_to_db(
             generated_by, duration
         ) VALUES (
             :id, :child_id, :title, :content_type, :theme_category, :theme_topic,
-            :personalization, :content_data, 'ready', 'pending', '{}',
+            :personalization, :content_data, :status, 'pending', '{}',
             :generated_by, :duration
         )
     """)
@@ -1040,6 +1080,7 @@ async def save_content_to_db(
         "theme_topic": theme_topic,
         "personalization": json.dumps(personalization),
         "content_data": json.dumps(content_data),
+        "status": status,
         "generated_by": json.dumps(generated_by),
         "duration": duration,
     })
@@ -1051,17 +1092,15 @@ async def save_content_to_db(
 class ProtagonistConfig(BaseModel):
     """主角配置."""
     animal: str | None = Field(default="bunny", description="动物类型: bunny, bear, cat, dog, panda, fox")
-    color: str | None = Field(default="white", description="主色: white, brown, orange, golden 等")
+    color: str | None = Field(default=None, description="主色: white, brown, orange, golden 等，为 None 时按动物类型自动选择")
     accessory: str | None = Field(default=None, description="配饰: blue overalls, red scarf 等")
 
-    @field_validator('animal', 'color', mode='before')
+    @field_validator('animal', mode='before')
     @classmethod
-    def convert_null_to_default(cls, v, info):
-        """Convert null to None, letting Field default take over."""
+    def convert_null_animal_to_default(cls, v):
+        """Convert null animal to default bunny."""
         if v is None:
-            # Return the field's default value
-            defaults = {'animal': 'bunny', 'color': 'white'}
-            return defaults.get(info.field_name)
+            return 'bunny'
         return v
 
 
@@ -1190,6 +1229,34 @@ async def _generate_picture_book_background(
     custom_prompt: str | None = None,
 ):
     """后台执行绘本生成任务."""
+    async with _GENERATION_SEMAPHORE:
+        await _do_generate_picture_book(
+            task_id, child_name, age_months, theme_topic, theme_category,
+            favorite_characters, voice_id, art_style, protagonist_animal,
+            protagonist_color, protagonist_accessory, color_palette,
+            story_enhancement, visual_enhancement, creation_mode, custom_prompt,
+        )
+
+
+async def _do_generate_picture_book(
+    task_id: str,
+    child_name: str,
+    age_months: int,
+    theme_topic: str,
+    theme_category: str,
+    favorite_characters: list[str] | None,
+    voice_id: str | None,
+    art_style: str | None = None,
+    protagonist_animal: str | None = None,
+    protagonist_color: str | None = None,
+    protagonist_accessory: str | None = None,
+    color_palette: str | None = None,
+    story_enhancement: dict | None = None,
+    visual_enhancement: dict | None = None,
+    creation_mode: str = "preset",
+    custom_prompt: str | None = None,
+):
+    """绘本生成的实际逻辑."""
     try:
         _task_status[task_id] = {
             "status": "processing",
@@ -1279,6 +1346,13 @@ async def _generate_picture_book_background(
             "message": "保存到数据库...",
         })
 
+        # 判断是否有失败的页面
+        failed_pages = result.get("failed_pages", [])
+        is_partial = len(failed_pages) > 0
+        # partial → status=generating（不会出现在前端列表，等待手动修复）
+        # complete → status=ready
+        save_status = "generating" if is_partial else "ready"
+
         # 使用独立的数据库会话保存
         async with async_session_factory() as db:
             # 合并 personalization 和用户输入参数
@@ -1306,9 +1380,12 @@ async def _generate_picture_book_background(
                     # 保存创作模式和自定义提示词
                     "creation_mode": creation_mode,
                     "custom_prompt": custom_prompt,
+                    # 记录失败页面信息，便于手动修复
+                    "failed_pages": failed_pages if is_partial else None,
                 },
                 duration=int(result.get("total_duration", 0)),
                 generated_by=result.get("generated_by", {}),
+                status=save_status,
             )
 
             # 更新生成日志的 content_id
@@ -1316,15 +1393,35 @@ async def _generate_picture_book_background(
             gen_logger = GenerationLogger(task_id=task_id)
             await gen_logger.update_content_id(content_id)
 
-        _task_status[task_id] = {
-            "status": "completed",
-            "progress": 100,
-            "stage": "completed",
-            "message": "生成完成",
-            "content_id": content_id,
-            "result": result,
-        }
-        logger.info(f"Picture book task {task_id} completed, content_id={content_id}")
+        if is_partial:
+            logger.warning(
+                f"Picture book task {task_id} saved as PARTIAL (content_id={content_id}), "
+                f"failed pages: {[p['page_num'] for p in failed_pages]}"
+            )
+            _task_status[task_id] = {
+                "status": "partial",
+                "progress": 95,
+                "stage": "repairing",
+                "message": f"正在自动修复 {len(failed_pages)} 页...",
+                "content_id": content_id,
+                "failed_pages": failed_pages,
+                "finished_at": time.time(),
+            }
+            # 启动自动修复后台任务
+            asyncio.create_task(
+                _auto_repair_content(task_id, content_id, failed_pages, voice_id)
+            )
+        else:
+            _task_status[task_id] = {
+                "status": "completed",
+                "progress": 100,
+                "stage": "completed",
+                "message": "生成完成",
+                "content_id": content_id,
+                "result": result,
+                "finished_at": time.time(),
+            }
+            logger.info(f"Picture book task {task_id} completed, content_id={content_id}")
 
     except Exception as e:
         logger.exception(f"Picture book task {task_id} failed: {e}")
@@ -1334,7 +1431,194 @@ async def _generate_picture_book_background(
             "stage": "failed",
             "message": "生成失败",
             "error": str(e),
+            "finished_at": time.time(),
         }
+
+
+async def _auto_repair_content(
+    task_id: str,
+    content_id: str,
+    failed_pages: list[dict],
+    voice_id: str | None,
+    max_attempts: int = 3,
+    delay_between_attempts: int = 10,
+):
+    """自动修复失败的页面（图片/音频），修复后更新 DB 状态为 ready.
+
+    修复策略：
+    - 图片失败: 用同一个 Gemini 服务重试（间隔递增，避免连续触发限制）
+    - 音频失败: 按 TTS fallback 链重试（gemini → qwen → minimax）
+    - 每次修复成功立即更新 DB 中对应页
+    - 全部修复完成后 status → ready
+    """
+    # 修复任务也需要 semaphore 保护，防止与其他生成任务并发导致 OOM
+    async with _GENERATION_SEMAPHORE:
+        logger.info(f"[AutoRepair] Starting repair for content {content_id}, {len(failed_pages)} page(s)")
+        try:
+            await _do_auto_repair(task_id, content_id, failed_pages, voice_id, max_attempts, delay_between_attempts)
+        except Exception as e:
+            logger.exception(f"[AutoRepair] Unexpected error repairing content {content_id}: {e}")
+            _task_status[task_id] = {
+                "status": "partial",
+                "progress": 95,
+                "stage": "repair_failed",
+                "message": f"自动修复异常中断: {e}",
+                "content_id": content_id,
+                "finished_at": time.time(),
+            }
+
+
+async def _do_auto_repair(
+    task_id: str,
+    content_id: str,
+    failed_pages: list[dict],
+    voice_id: str | None,
+    max_attempts: int,
+    delay_between_attempts: int,
+):
+    """实际执行自动修复逻辑（由 _auto_repair_content 包裹异常处理）."""
+    from moana.services.image import get_image_service
+    from moana.services.image.base import ImageStyle
+    from moana.services.image.gemini import GeminiImageContentError
+    from moana.pipelines.picture_book import PictureBookPipeline
+
+    image_service = get_image_service()
+    pipeline = PictureBookPipeline()
+    repaired_count = 0
+
+    for page_info in failed_pages:
+        page_num = page_info["page_num"]
+        page_idx = page_num - 1  # 0-indexed
+
+        # 从 DB 读取当前 content_data（获取 prompt/text 等输入信息）
+        async with async_session_factory() as db:
+            result = await db.execute(
+                text("SELECT content_data FROM contents WHERE id = :id"),
+                {"id": content_id},
+            )
+            row = result.fetchone()
+            if not row:
+                logger.error(f"[AutoRepair] Content {content_id} not found in DB")
+                return
+            content_data = row[0]
+            page_data = content_data["pages"][page_idx]
+
+        # 收集修复结果（不直接修改 page_data，避免 stale data 问题）
+        repairs: dict = {}
+
+        # 修复图片
+        if page_info.get("image_failed"):
+            image_prompt = page_data.get("image_prompt", "")
+            repaired = False
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    wait_time = delay_between_attempts * attempt
+                    logger.info(f"[AutoRepair] Page {page_num} image attempt {attempt}/{max_attempts} (wait {wait_time}s)")
+                    await asyncio.sleep(wait_time)
+                    img_result = await image_service.generate(
+                        prompt=image_prompt, style=ImageStyle.NONE,
+                    )
+                    repairs["image_url"] = img_result.url
+                    repairs["image_thumb_url"] = img_result.thumb_url or img_result.url
+                    repaired = True
+                    logger.info(f"[AutoRepair] Page {page_num} image repaired: {img_result.url}")
+                    break
+                except GeminiImageContentError as e:
+                    logger.warning(f"[AutoRepair] Page {page_num} image content error (not retryable): {e}")
+                    break  # 确定性失败，不再重试
+                except Exception as e:
+                    logger.warning(f"[AutoRepair] Page {page_num} image attempt {attempt} failed: {e}")
+
+            if not repaired:
+                logger.error(f"[AutoRepair] Page {page_num} image repair exhausted all attempts")
+                _task_status[task_id] = {
+                    "status": "partial",
+                    "progress": 95,
+                    "stage": "repair_failed",
+                    "message": f"第 {page_num} 页图片自动修复失败，需手动处理",
+                    "content_id": content_id,
+                    "finished_at": time.time(),
+                }
+                return
+
+        # 修复音频
+        if page_info.get("audio_failed"):
+            page_text = page_data.get("text", "")
+            repaired = False
+            try:
+                tts_result = await pipeline._retry_audio_with_fallback(
+                    text=page_text,
+                    voice_id=voice_id,
+                    index=page_idx,
+                    total=len(content_data["pages"]),
+                )
+                repairs["audio_url"] = tts_result.audio_url
+                repairs["audio_duration"] = tts_result.duration
+                repaired = True
+                logger.info(f"[AutoRepair] Page {page_num} audio repaired: {tts_result.audio_url}")
+            except Exception as e:
+                logger.error(f"[AutoRepair] Page {page_num} audio repair failed: {e}")
+
+            if not repaired:
+                _task_status[task_id] = {
+                    "status": "partial",
+                    "progress": 95,
+                    "stage": "repair_failed",
+                    "message": f"第 {page_num} 页音频自动修复失败，需手动处理",
+                    "content_id": content_id,
+                    "finished_at": time.time(),
+                }
+                return
+
+        # 更新 DB：重新读取最新数据，仅合并修复字段（避免 stale data 覆盖）
+        async with async_session_factory() as db:
+            result = await db.execute(
+                text("SELECT content_data FROM contents WHERE id = :id"),
+                {"id": content_id},
+            )
+            row = result.fetchone()
+            if not row:
+                logger.error(f"[AutoRepair] Content {content_id} disappeared from DB during repair")
+                return
+            current_data = row[0]
+            # 仅将修复的字段合并到最新数据中
+            current_data["pages"][page_idx].update(repairs)
+            # 重新计算总时长
+            total_duration = sum(p.get("audio_duration", 0) for p in current_data["pages"])
+            # 清除已修复页的失败标记
+            if current_data.get("failed_pages"):
+                current_data["failed_pages"] = [
+                    fp for fp in current_data["failed_pages"] if fp["page_num"] != page_num
+                ]
+                if not current_data["failed_pages"]:
+                    current_data["failed_pages"] = None
+
+            await db.execute(
+                text("UPDATE contents SET content_data = :data, duration = :dur WHERE id = :id"),
+                {"data": json.dumps(current_data), "dur": int(total_duration), "id": content_id},
+            )
+            await db.commit()
+
+        repaired_count += 1
+        logger.info(f"[AutoRepair] Page {page_num} fully repaired ({repaired_count}/{len(failed_pages)})")
+
+    # 全部修复完成，status → ready
+    async with async_session_factory() as db:
+        await db.execute(
+            text("UPDATE contents SET status = 'ready' WHERE id = :id"),
+            {"id": content_id},
+        )
+        await db.commit()
+
+    logger.info(f"[AutoRepair] Content {content_id} fully repaired and set to ready")
+    _task_status[task_id] = {
+        "status": "completed",
+        "progress": 100,
+        "stage": "completed",
+        "message": f"生成完成（自动修复了 {repaired_count} 页）",
+        "content_id": content_id,
+        "finished_at": time.time(),
+    }
 
 
 @router.post("/picture-book/async", response_model=AsyncTaskResponse)
@@ -1449,10 +1733,9 @@ async def get_picture_book_status(task_id: str):
 
     前端应每 3-5 秒轮询一次，直到 status 为 completed 或 failed。
     """
-    if task_id not in _task_status:
+    status = await _task_status.get(task_id)
+    if status is None:
         raise HTTPException(status_code=404, detail="Task not found")
-
-    status = _task_status[task_id]
     return TaskStatusResponse(
         task_id=task_id,
         status=status.get("status", "unknown"),
@@ -1685,6 +1968,12 @@ async def _generate_nursery_rhyme_background(
         task_id: 任务ID
         params: 所有请求参数的字典，直接透传给 Pipeline
     """
+    async with _GENERATION_SEMAPHORE:
+        await _do_generate_nursery_rhyme(task_id, params)
+
+
+async def _do_generate_nursery_rhyme(task_id: str, params: dict):
+    """儿歌生成的实际逻辑."""
     # 提取必需参数
     child_name = params.get("child_name", "宝宝")
     age_months = params.get("age_months", 36)
@@ -1811,6 +2100,7 @@ async def _generate_nursery_rhyme_background(
             "message": "生成完成",
             "content_id": content_id,
             "result": result,
+            "finished_at": time.time(),
         }
         logger.info(f"Nursery rhyme task {task_id} completed, content_id={content_id}")
 
@@ -1822,6 +2112,7 @@ async def _generate_nursery_rhyme_background(
             "stage": "failed",
             "message": "生成失败",
             "error": str(e),
+            "finished_at": time.time(),
         }
 
 
@@ -1919,10 +2210,9 @@ async def get_nursery_rhyme_status(task_id: str, response: Response):
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
 
-    if task_id not in _task_status:
+    status = await _task_status.get(task_id)
+    if status is None:
         raise HTTPException(status_code=404, detail="Task not found")
-
-    status = _task_status[task_id]
     return TaskStatusResponse(
         task_id=task_id,
         status=status.get("status", "unknown"),
@@ -2024,6 +2314,19 @@ async def _generate_video_background(
     motion_style: str | None = None,
 ):
     """后台执行视频生成任务."""
+    async with _GENERATION_SEMAPHORE:
+        await _do_generate_video(task_id, picture_book_data, child_name, theme_topic, theme_category, motion_style)
+
+
+async def _do_generate_video(
+    task_id: str,
+    picture_book_data: dict,
+    child_name: str,
+    theme_topic: str,
+    theme_category: str,
+    motion_style: str | None = None,
+):
+    """视频生成的实际逻辑."""
     try:
         _task_status[task_id] = {
             "status": "processing",
@@ -2114,6 +2417,7 @@ async def _generate_video_background(
             "message": "生成完成",
             "content_id": content_id,
             "result": result,
+            "finished_at": time.time(),
         }
         logger.info(f"Video task {task_id} completed, content_id={content_id}")
 
@@ -2125,6 +2429,7 @@ async def _generate_video_background(
             "stage": "failed",
             "message": "生成失败",
             "error": str(e),
+            "finished_at": time.time(),
         }
 
 
@@ -2187,10 +2492,9 @@ async def get_video_status(task_id: str):
     - result: 完成后的视频数据
     - error: 失败时的错误信息
     """
-    if task_id not in _task_status:
+    status = await _task_status.get(task_id)
+    if status is None:
         raise HTTPException(status_code=404, detail="Task not found")
-
-    status = _task_status[task_id]
     return TaskStatusResponse(
         task_id=task_id,
         status=status.get("status", "unknown"),
@@ -2210,6 +2514,15 @@ async def _generate_standalone_video_background(
     request: StandaloneVideoRequest,
 ):
     """Background task for standalone video generation."""
+    async with _GENERATION_SEMAPHORE:
+        await _do_generate_standalone_video(task_id, request)
+
+
+async def _do_generate_standalone_video(
+    task_id: str,
+    request: StandaloneVideoRequest,
+):
+    """独立视频生成的实际逻辑."""
     from moana.pipelines.standalone_video import StandaloneVideoPipeline
     from moana.models.content import Content, ContentType, ContentStatus
 
@@ -2275,6 +2588,7 @@ async def _generate_standalone_video_background(
                     "thumbnail_url": result["thumbnail_url"],
                     "duration": result["duration"],
                 },
+                "finished_at": time.time(),
             }
 
     except Exception as e:
@@ -2285,6 +2599,7 @@ async def _generate_standalone_video_background(
             "stage": "failed",
             "message": "生成失败",
             "error": str(e),
+            "finished_at": time.time(),
         }
 
 
