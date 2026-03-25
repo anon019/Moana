@@ -70,6 +70,16 @@ npm run ensure:public-config
 
 `npm run dev:mp-weixin` 和 `npm run build:mp-weixin` 会先自动执行一次 `npm run ensure:public-config`，确保首次下载仓库后可以直接本地编译；如果你已经填过自己的配置，脚本不会覆盖已有文件。
 
+### 配置 API 地址
+
+如果你要在本地真正跑通内容接口，而不只是完成编译，请先配置 API 地址：
+
+```bash
+cp .env.example .env.local
+```
+
+然后把 `.env.local` 里的 `VITE_API_URL` 改成你自己的后端地址。`.env.local` 不会被提交到仓库。
+
 ### 开发模式
 
 ```bash

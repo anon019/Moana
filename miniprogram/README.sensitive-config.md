@@ -42,6 +42,7 @@ npm run ensure:public-config
 - ⚠️ **永远不要提交包含真实 AppID 的配置文件到 Git**
 - ✅ 这些文件已经添加到 `.gitignore`，不会被 Git 跟踪
 - 📝 如果需要分享配置，请使用模板文件（`.template` 后缀）
+- 🌐 如果要本地联调接口，请复制 `.env.example` 为 `.env.local`，并填入自己的 `VITE_API_URL`
 
 ### 获取微信小程序 AppID
 
