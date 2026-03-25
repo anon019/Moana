@@ -422,7 +422,7 @@ chore: 构建/工具
 
 ## 🔗 API 接口
 
-**基础地址**: `https://your-api.example.com/api/v1`
+**基础地址**: `VITE_API_URL`（通过 `.env.local` 配置）
 
 主要接口：
 - `POST /content/picture-book/async` - 绘本生成
