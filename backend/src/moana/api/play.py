@@ -1,22 +1,26 @@
 # src/moana/api/play.py
 """Play API - 播放历史和答题记录相关端点."""
-import uuid
-from collections import defaultdict
-from datetime import datetime, timedelta
-from typing import Annotated, Literal, Optional
+from datetime import date, datetime, timedelta, timezone
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import Integer, and_, or_, select, func, case, cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from moana.config import get_settings
 from moana.database import get_db
+from moana.models.child import Child
 from moana.models.content import Content
+from moana.models.play_history import PlayHistory, InteractionRecord
+from moana.models.user import User
+from moana.routers.auth import get_current_user
 
 router = APIRouter()
 
 
 # ========== Request/Response Schemas ==========
+
 
 class StartPlayRequest(BaseModel):
     """开始播放请求."""
@@ -26,7 +30,11 @@ class StartPlayRequest(BaseModel):
         description="Content type"
     )
     # Optional: auto-fetched from content if not provided
-    total_pages: Optional[int] = Field(default=None, ge=1, description="Total pages/segments (auto-detected if not provided)")
+    total_pages: int | None = Field(
+        default=None,
+        ge=1,
+        description="Total pages/segments (auto-detected if not provided)",
+    )
 
 
 class StartPlayResponse(BaseModel):
@@ -78,6 +86,7 @@ class PlayHistoryListResponse(BaseModel):
     items: list[PlayHistoryItem]
     total: int
     has_more: bool
+    next_cursor: str | None = None
 
 
 class SubmitInteractionRequest(BaseModel):
@@ -143,232 +152,500 @@ class LearningStatsResponse(BaseModel):
     top_themes: list[ThemeStats]
 
 
-# ========== 内存存储（MVP 阶段，后续替换为数据库） ==========
+VALID_CONTENT_TYPES = {"picture_book", "nursery_rhyme", "video"}
 
-_play_histories: dict[str, dict] = {}
-_interactions: dict[str, dict] = {}
+
+async def _get_admin_user_id(db: AsyncSession) -> str | None:
+    settings = get_settings()
+    admin_openid = settings.admin_openid
+    if not admin_openid:
+        return None
+
+    admin_user_id = await db.scalar(select(User.id).where(User.openid == admin_openid))
+    return admin_user_id
+
+
+async def _get_accessible_child(
+    db: AsyncSession,
+    child_id: str,
+    current_user: User,
+) -> Child | None:
+    """获取用户可访问的宝贝（家庭共享模式）.
+
+    用户可以访问：
+    1. 自己创建的宝贝
+    2. 管理员创建的宝贝（家庭共享）
+    """
+    result = await db.execute(select(Child).where(Child.id == child_id))
+    child = result.scalar_one_or_none()
+
+    if not child:
+        return None
+
+    if child.parent_id == current_user.id:
+        return child
+
+    admin_user_id = await _get_admin_user_id(db)
+    if admin_user_id and child.parent_id == admin_user_id:
+        return child
+
+    return None
+
+
+def _normalize_content_type(raw: object | None) -> str:
+    """Normalize stored content type to API string constants."""
+    if raw is None:
+        return ""
+
+    value = str(raw)
+    if value.startswith("ContentType."):
+        value = value.split(".", 1)[1]
+
+    return value.lower()
+
+
+def _resolve_total_pages(content_type: str, content_data: dict, provided: int | None) -> int:
+    if provided:
+        return max(1, provided)
+
+    if not isinstance(content_data, dict):
+        return 1
+
+    total_pages = 1
+    if content_type == "picture_book":
+        pages = content_data.get("pages") or []
+        total_pages = len(pages) if isinstance(pages, (list, tuple)) else 1
+    elif content_type == "video":
+        clips = content_data.get("clips") or []
+        total_pages = len(clips) if isinstance(clips, (list, tuple)) else 1
+    elif content_type == "nursery_rhyme":
+        total_pages = 1
+
+    return max(1, total_pages)
+
+
+def _duration_minutes(started_at: datetime | None, last_played_at: datetime | None, completed_at: datetime | None) -> int:
+    if started_at is None:
+        return 0
+
+    end_time = completed_at or last_played_at or started_at
+    if end_time < started_at:
+        return 0
+
+    return int((end_time - started_at).total_seconds() // 60)
+
+
+def _encode_play_history_cursor(last_played_at: datetime, history_id: str) -> str:
+    return f"{last_played_at.isoformat()}|{history_id}"
+
+
+def _decode_play_history_cursor(cursor: str) -> tuple[datetime, str]:
+    cursor_ts_str, cursor_id = cursor.split("|", 1)
+    cursor_ts = datetime.fromisoformat(cursor_ts_str.replace("Z", "+00:00"))
+    if cursor_ts.tzinfo is None:
+        cursor_ts = cursor_ts.replace(tzinfo=timezone.utc)
+    if not cursor_id:
+        raise ValueError
+    return cursor_ts, cursor_id
+
+
+def _coerce_date(value: object | None) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _session_duration_minutes_expr():
+    # Keep duration aggregation in SQL so learning-stats does not scan every
+    # session row in Python for common date-range requests.
+    duration_seconds = func.extract(
+        "epoch",
+        func.coalesce(
+            PlayHistory.completed_at,
+            PlayHistory.last_played_at,
+            PlayHistory.started_at,
+        ) - PlayHistory.started_at,
+    )
+    return cast(func.greatest(duration_seconds, 0) / 60, Integer)
 
 
 # ========== API Endpoints ==========
 
+
 @router.post("/start", response_model=StartPlayResponse)
 async def start_play(
     request: StartPlayRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
-):
+) -> StartPlayResponse:
     """开始播放内容.
 
     如果已有未完成的播放记录，返回断点位置（断点续播）。
-    total_pages 可选，如果不传则自动从内容数据中获取。
     """
-    # 查找未完成的播放记录
-    for ph_id, ph in _play_histories.items():
-        if (ph["child_id"] == request.child_id and
-            ph["content_id"] == request.content_id and
-            ph["completed_at"] is None):
-            # 断点续播
-            return StartPlayResponse(
-                play_history_id=ph_id,
-                current_page=ph["current_page"],
-                completion_rate=ph["completion_rate"],
-                is_resumed=True,
-            )
-
-    # 获取 total_pages
-    total_pages = request.total_pages
-    if total_pages is None:
-        # Auto-fetch from content
-        result = await db.execute(
-            select(Content).where(Content.id == request.content_id)
+    child = await _get_accessible_child(db, request.child_id, current_user)
+    if not child:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Child not found",
         )
-        content = result.scalar_one_or_none()
-        if not content:
-            raise HTTPException(status_code=404, detail="Content not found")
 
-        content_data = content.content_data or {}
-        if request.content_type == "picture_book":
-            total_pages = len(content_data.get("pages", []))
-        elif request.content_type == "nursery_rhyme":
-            # Nursery rhyme is single-page
-            total_pages = 1
-        elif request.content_type == "video":
-            total_pages = len(content_data.get("clips", [])) or 1
-        else:
-            total_pages = 1
+    result = await db.execute(select(Content).where(Content.id == request.content_id))
+    content = result.scalar_one_or_none()
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found")
 
-        if total_pages == 0:
-            total_pages = 1  # Minimum 1 page
+    if content.content_type.value != request.content_type:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Content type mismatch",
+        )
 
-    # 创建新记录
-    play_id = str(uuid.uuid4())
-    now = datetime.now().isoformat()
+    existing = await db.execute(
+        select(PlayHistory)
+        .where(
+            PlayHistory.child_id == child.id,
+            PlayHistory.content_id == request.content_id,
+            PlayHistory.completed_at.is_(None),
+        )
+        .order_by(PlayHistory.last_played_at.desc())
+        .limit(1)
+    )
+    last_history = existing.scalar_one_or_none()
+    if last_history:
+        return StartPlayResponse(
+            play_history_id=last_history.id,
+            current_page=last_history.current_page,
+            completion_rate=last_history.completion_rate,
+            is_resumed=True,
+        )
 
-    _play_histories[play_id] = {
-        "id": play_id,
-        "child_id": request.child_id,
-        "content_id": request.content_id,
-        "content_type": request.content_type,
-        "current_page": 1,
-        "total_pages": total_pages,
-        "completion_rate": 0.0,
-        "started_at": now,
-        "last_played_at": now,
-        "completed_at": None,
-    }
+    content_data = content.content_data or {}
+    total_pages = _resolve_total_pages(
+        content_type=request.content_type,
+        content_data=content_data,
+        provided=request.total_pages,
+    )
+
+    play = PlayHistory(
+        child_id=child.id,
+        content_id=request.content_id,
+        content_type=request.content_type,
+        total_pages=total_pages,
+    )
+    db.add(play)
+    await db.commit()
+    await db.refresh(play)
 
     return StartPlayResponse(
-        play_history_id=play_id,
-        current_page=1,
-        completion_rate=0.0,
+        play_history_id=play.id,
+        current_page=play.current_page,
+        completion_rate=play.completion_rate,
         is_resumed=False,
     )
 
 
 @router.post("/progress", response_model=UpdateProgressResponse)
-async def update_progress(request: UpdateProgressRequest):
+async def update_progress(
+    request: UpdateProgressRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UpdateProgressResponse:
     """更新播放进度."""
-    ph = _play_histories.get(request.play_history_id)
-    if not ph:
+    result = await db.execute(
+        select(PlayHistory).where(PlayHistory.id == request.play_history_id)
+    )
+    play_history = result.scalar_one_or_none()
+
+    if not play_history:
         raise HTTPException(status_code=404, detail="Play history not found")
 
-    if ph["completed_at"]:
-        raise HTTPException(status_code=400, detail="Play already completed")
+    if not await _get_accessible_child(db, play_history.child_id, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Play history not found",
+        )
 
-    # 更新进度
-    ph["current_page"] = request.current_page
-    ph["completion_rate"] = request.current_page / ph["total_pages"]
-    ph["last_played_at"] = datetime.now().isoformat()
+    if play_history.completed_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Play already completed",
+        )
 
-    return UpdateProgressResponse(completion_rate=ph["completion_rate"])
+    if request.current_page > play_history.total_pages:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current page exceeds total pages",
+        )
+
+    play_history.update_progress(request.current_page)
+    await db.commit()
+    await db.refresh(play_history)
+
+    return UpdateProgressResponse(completion_rate=play_history.completion_rate)
 
 
 @router.post("/complete", response_model=CompletePlayResponse)
-async def complete_play(request: CompletePlayRequest):
+async def complete_play(
+    request: CompletePlayRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CompletePlayResponse:
     """完成播放."""
-    ph = _play_histories.get(request.play_history_id)
-    if not ph:
+    result = await db.execute(
+        select(PlayHistory).where(PlayHistory.id == request.play_history_id)
+    )
+    play_history = result.scalar_one_or_none()
+
+    if not play_history:
         raise HTTPException(status_code=404, detail="Play history not found")
 
-    if ph["completed_at"]:
-        raise HTTPException(status_code=400, detail="Play already completed")
+    if not await _get_accessible_child(db, play_history.child_id, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Play history not found",
+        )
 
-    # 标记完成
-    now = datetime.now()
-    ph["current_page"] = ph["total_pages"]
-    ph["completion_rate"] = 1.0
-    ph["completed_at"] = now.isoformat()
-    ph["last_played_at"] = now.isoformat()
+    if play_history.completed_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Play already completed",
+        )
 
-    # 计算总时长
-    started = datetime.fromisoformat(ph["started_at"])
-    total_seconds = (now - started).total_seconds()
+    play_history.mark_completed()
+    await db.commit()
+    await db.refresh(play_history)
 
     return CompletePlayResponse(
-        completed_at=ph["completed_at"],
-        total_time_seconds=total_seconds,
+        completed_at=play_history.completed_at.isoformat(),
+        total_time_seconds=play_history.total_time_seconds,
     )
 
 
 @router.get("/history/{child_id}", response_model=PlayHistoryListResponse)
 async def get_play_history(
     child_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     limit: int = 20,
     offset: int = 0,
+    cursor: str | None = None,
     content_type: str | None = None,
-):
+) -> PlayHistoryListResponse:
     """获取播放历史列表."""
-    # 过滤
-    items = [
-        ph for ph in _play_histories.values()
-        if ph["child_id"] == child_id
-        and (content_type is None or ph["content_type"] == content_type)
-    ]
+    if limit <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="limit must be greater than 0",
+        )
+    if limit > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="limit must not exceed 100",
+        )
+    if offset < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="offset must be greater than or equal to 0",
+        )
+    if cursor is not None and offset != 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="cursor and offset cannot be used together",
+        )
 
-    # 按最后播放时间排序
-    items.sort(key=lambda x: x["last_played_at"], reverse=True)
+    child = await _get_accessible_child(db, child_id, current_user)
+    if not child:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Child not found",
+        )
 
-    total = len(items)
-    items = items[offset:offset + limit]
+    if content_type is not None and content_type not in VALID_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid content type",
+        )
+
+    base_filters = [PlayHistory.child_id == child_id]
+    if content_type:
+        base_filters.append(PlayHistory.content_type == content_type)
+
+    page_filters = list(base_filters)
+    if cursor:
+        try:
+            cursor_ts, cursor_id = _decode_play_history_cursor(cursor)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid cursor format. expected iso_datetime|history_id",
+            ) from exc
+        page_filters.append(
+            or_(
+                PlayHistory.last_played_at < cursor_ts,
+                and_(
+                    PlayHistory.last_played_at == cursor_ts,
+                    PlayHistory.id < cursor_id,
+                ),
+            )
+        )
+
+    count_result = await db.execute(
+        select(func.count()).select_from(PlayHistory).where(*base_filters)
+    )
+    total = int(count_result.scalar_one() or 0)
+
+    query = (
+        select(PlayHistory)
+        .where(*page_filters)
+        .order_by(
+            PlayHistory.last_played_at.desc(),
+            PlayHistory.id.desc(),
+        )
+        .limit(limit + 1)
+    )
+    if offset:
+        query = query.offset(offset)
+
+    result = await db.execute(query)
+    records = list(result.scalars().all())
+
+    next_cursor = None
+    has_more = len(records) > limit
+    if has_more:
+        records = records[:limit]
+        last_record = records[-1]
+        next_cursor = _encode_play_history_cursor(last_record.last_played_at, last_record.id)
 
     return PlayHistoryListResponse(
         items=[
             PlayHistoryItem(
-                id=ph["id"],
-                content_id=ph["content_id"],
-                content_type=ph["content_type"],
-                current_page=ph["current_page"],
-                total_pages=ph["total_pages"],
-                completion_rate=ph["completion_rate"],
-                started_at=ph["started_at"],
-                last_played_at=ph["last_played_at"],
-                completed_at=ph["completed_at"],
-                is_completed=ph["completed_at"] is not None,
+                id=record.id,
+                content_id=record.content_id,
+                content_type=_normalize_content_type(record.content_type),
+                current_page=record.current_page,
+                total_pages=record.total_pages,
+                completion_rate=record.completion_rate,
+                started_at=record.started_at.isoformat(),
+                last_played_at=record.last_played_at.isoformat(),
+                completed_at=record.completed_at.isoformat() if record.completed_at else None,
+                is_completed=record.is_completed,
             )
-            for ph in items
+            for record in records
         ],
         total=total,
-        has_more=offset + limit < total,
+        has_more=has_more,
+        next_cursor=next_cursor,
     )
 
 
 @router.post("/interaction", response_model=SubmitInteractionResponse)
-async def submit_interaction(request: SubmitInteractionRequest):
+async def submit_interaction(
+    request: SubmitInteractionRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SubmitInteractionResponse:
     """提交答题结果."""
-    ph = _play_histories.get(request.play_history_id)
-    if not ph:
+    result = await db.execute(
+        select(PlayHistory).where(PlayHistory.id == request.play_history_id)
+    )
+    play_history = result.scalar_one_or_none()
+
+    if not play_history:
         raise HTTPException(status_code=404, detail="Play history not found")
 
-    # 创建答题记录
-    interaction_id = str(uuid.uuid4())
-    now = datetime.now().isoformat()
+    if not await _get_accessible_child(db, play_history.child_id, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Play history not found",
+        )
 
-    _interactions[interaction_id] = {
-        "id": interaction_id,
-        "play_history_id": request.play_history_id,
-        "child_id": ph["child_id"],
-        "page_num": request.page_num,
-        "question_type": request.question_type,
-        "is_correct": request.is_correct,
-        "attempts": request.attempts,
-        "time_spent_ms": request.time_spent_ms,
-        "answered_at": now,
-    }
+    if request.page_num > play_history.total_pages:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Question page exceeds total pages",
+        )
 
-    return SubmitInteractionResponse(interaction_id=interaction_id)
+    interaction = InteractionRecord(
+        play_history_id=request.play_history_id,
+        page_num=request.page_num,
+        question_type=request.question_type,
+        is_correct=request.is_correct,
+        attempts=request.attempts,
+        time_spent_ms=request.time_spent_ms,
+    )
+    db.add(interaction)
+    await db.commit()
+    await db.refresh(interaction)
+
+    return SubmitInteractionResponse(interaction_id=interaction.id)
 
 
 @router.get("/stats/{child_id}", response_model=PlayStatsResponse)
-async def get_play_stats(child_id: str):
+async def get_play_stats(
+    child_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PlayStatsResponse:
     """获取答题统计."""
-    # 过滤该孩子的答题记录
-    child_interactions = [
-        i for i in _interactions.values()
-        if i["child_id"] == child_id
-    ]
+    child = await _get_accessible_child(db, child_id, current_user)
+    if not child:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Child not found",
+        )
 
-    total = len(child_interactions)
-    correct = sum(1 for i in child_interactions if i["is_correct"])
+    total_row = await db.execute(
+        select(
+            func.count(InteractionRecord.id).label("total_questions"),
+            func.coalesce(
+                func.sum(case((InteractionRecord.is_correct.is_(True), 1), else_=0)),
+                0,
+            ).label("correct_count"),
+        )
+        .join(PlayHistory, InteractionRecord.play_history_id == PlayHistory.id)
+        .where(PlayHistory.child_id == child.id)
+    )
+    total = total_row.one()
 
-    # 按题型统计
+    total_questions = int(total.total_questions or 0)
+    correct_count = int(total.correct_count or 0)
+
+    by_type_query = await db.execute(
+        select(
+            InteractionRecord.question_type.label("question_type"),
+            func.count(InteractionRecord.id).label("total"),
+            func.coalesce(
+                func.sum(case((InteractionRecord.is_correct.is_(True), 1), else_=0)),
+                0,
+            ).label("correct"),
+        )
+        .join(PlayHistory, InteractionRecord.play_history_id == PlayHistory.id)
+        .where(PlayHistory.child_id == child.id)
+        .group_by(InteractionRecord.question_type)
+    )
+    by_type_rows = by_type_query.all()
+
     by_type: dict[str, dict] = {}
-    for i in child_interactions:
-        qt = i["question_type"]
-        if qt not in by_type:
-            by_type[qt] = {"total": 0, "correct": 0}
-        by_type[qt]["total"] += 1
-        if i["is_correct"]:
-            by_type[qt]["correct"] += 1
-
-    # 计算正确率
-    for qt in by_type:
-        t = by_type[qt]["total"]
-        c = by_type[qt]["correct"]
-        by_type[qt]["accuracy_rate"] = c / t if t > 0 else 0.0
+    for row in by_type_rows:
+        total_by_type = int(row.total or 0)
+        correct_by_type = int(row.correct or 0)
+        by_type[row.question_type] = {
+            "total": total_by_type,
+            "correct": correct_by_type,
+            "accuracy_rate": correct_by_type / total_by_type if total_by_type > 0 else 0.0,
+        }
 
     return PlayStatsResponse(
-        total_questions=total,
-        correct_count=correct,
-        accuracy_rate=correct / total if total > 0 else 0.0,
+        total_questions=total_questions,
+        correct_count=correct_count,
+        accuracy_rate=correct_count / total_questions if total_questions > 0 else 0.0,
         by_type=by_type,
     )
 
@@ -376,104 +653,164 @@ async def get_play_stats(child_id: str):
 @router.get("/learning-stats/{child_id}", response_model=LearningStatsResponse)
 async def get_learning_stats(
     child_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     days: int = 7,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
-):
+) -> LearningStatsResponse:
     """Get detailed learning statistics for a child.
 
     Returns aggregated learning data for the specified period (default 7 days).
     """
-    today = datetime.now().date()
+    if days <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="days must be greater than 0",
+        )
+    if days > 365:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="days must not exceed 365",
+        )
+
+    child = await _get_accessible_child(db, child_id, current_user)
+    if not child:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Child not found",
+        )
+
+    now = datetime.now(timezone.utc)
+    today = now.date()
     start_date = today - timedelta(days=days - 1)
+    start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
 
-    # Filter play histories for this child in date range
-    child_histories = [
-        ph for ph in _play_histories.values()
-        if ph["child_id"] == child_id
-    ]
+    duration_minutes_expr = _session_duration_minutes_expr()
+    activity_date_expr = func.date(PlayHistory.started_at).label("activity_date")
 
-    # Filter by date range
-    histories_in_range = []
-    for ph in child_histories:
-        ph_date = datetime.fromisoformat(ph["started_at"]).date()
-        if start_date <= ph_date <= today:
-            histories_in_range.append(ph)
+    daily_result = await db.execute(
+        select(
+            activity_date_expr,
+            func.coalesce(func.sum(duration_minutes_expr), 0).label("duration_minutes"),
+            func.count(PlayHistory.id).label("contents_count"),
+        )
+        .where(
+            PlayHistory.child_id == child.id,
+            PlayHistory.started_at >= start_dt,
+        )
+        .group_by(activity_date_expr)
+        .order_by(activity_date_expr.asc())
+    )
+    daily_rows = daily_result.all()
 
-    # Calculate totals by content type
-    total_books = sum(1 for ph in histories_in_range if ph["content_type"] == "picture_book")
-    total_songs = sum(1 for ph in histories_in_range if ph["content_type"] == "nursery_rhyme")
-    total_videos = sum(1 for ph in histories_in_range if ph["content_type"] == "video")
+    summary_result = await db.execute(
+        select(
+            func.coalesce(
+                func.sum(case((PlayHistory.content_type == "picture_book", 1), else_=0)),
+                0,
+            ).label("total_books"),
+            func.coalesce(
+                func.sum(case((PlayHistory.content_type == "nursery_rhyme", 1), else_=0)),
+                0,
+            ).label("total_songs"),
+            func.coalesce(
+                func.sum(case((PlayHistory.content_type == "video", 1), else_=0)),
+                0,
+            ).label("total_videos"),
+        )
+        .where(PlayHistory.child_id == child.id, PlayHistory.started_at >= start_dt)
+    )
+    summary_row = summary_result.one()
 
-    # Calculate total duration (estimate from completed sessions)
-    total_duration = 0
-    for ph in histories_in_range:
-        if ph["completed_at"]:
-            started = datetime.fromisoformat(ph["started_at"])
-            completed = datetime.fromisoformat(ph["completed_at"])
-            total_duration += int((completed - started).total_seconds() / 60)
-        else:
-            # Estimate 5 minutes per incomplete session
-            total_duration += 5
+    daily_map: dict[date, dict[str, int]] = {}
+    total_books = int(summary_row.total_books or 0)
+    total_songs = int(summary_row.total_songs or 0)
+    total_videos = int(summary_row.total_videos or 0)
+    total_duration_minutes = 0
+    activity_dates: set[date] = set()
 
-    # Calculate daily activity
-    daily_data: dict[str, dict] = defaultdict(lambda: {"duration": 0, "count": 0})
-    for ph in histories_in_range:
-        ph_date = datetime.fromisoformat(ph["started_at"]).date().isoformat()
-        daily_data[ph_date]["count"] += 1
-        if ph["completed_at"]:
-            started = datetime.fromisoformat(ph["started_at"])
-            completed = datetime.fromisoformat(ph["completed_at"])
-            daily_data[ph_date]["duration"] += int((completed - started).total_seconds() / 60)
-        else:
-            daily_data[ph_date]["duration"] += 5
+    for row in daily_rows:
+        activity_date = _coerce_date(row.activity_date)
+        if activity_date is None:
+            continue
 
-    # Build daily_activity list (all days in range, even if no activity)
-    daily_activity = []
-    for i in range(days):
-        date = (today - timedelta(days=i)).isoformat()
-        data = daily_data.get(date, {"duration": 0, "count": 0})
-        daily_activity.append(DailyActivity(
-            date=date,
-            duration_minutes=data["duration"],
-            contents_count=data["count"],
-        ))
+        duration_minutes = int(row.duration_minutes or 0)
+        contents_count = int(row.contents_count or 0)
+        daily_map[activity_date] = {
+            "duration_minutes": duration_minutes,
+            "count": contents_count,
+        }
+        activity_dates.add(activity_date)
+        total_duration_minutes += duration_minutes
 
-    # Calculate streak days (consecutive days with activity from today backwards)
     streak_days = 0
-    for i in range(days):
-        date = (today - timedelta(days=i)).isoformat()
-        if daily_data.get(date, {}).get("count", 0) > 0:
+    cursor = today
+    while cursor >= start_date:
+        if cursor in activity_dates:
             streak_days += 1
+            cursor -= timedelta(days=1)
         else:
             break
 
-    # Get interaction rate from existing stats
-    child_interactions = [
-        i for i in _interactions.values()
-        if i["child_id"] == child_id
-    ]
-    total_interactions = len(child_interactions)
-    correct_interactions = sum(1 for i in child_interactions if i["is_correct"])
-    interaction_rate = correct_interactions / total_interactions if total_interactions > 0 else 0.0
+    # Daily breakdown for each day in range
+    daily_activity: list[DailyActivity] = []
+    for offset_day in range(days):
+        date_obj = today - timedelta(days=offset_day)
+        data = daily_map.get(date_obj, {"duration_minutes": 0, "count": 0})
+        daily_activity.append(DailyActivity(
+            date=date_obj.isoformat(),
+            duration_minutes=int(data["duration_minutes"]),
+            contents_count=int(data["count"]),
+        ))
 
-    # Get top themes (requires database query for content themes)
-    theme_counts: dict[str, int] = defaultdict(int)
-    content_ids = list(set(ph["content_id"] for ph in histories_in_range))
-
-    if content_ids and db is not None:
-        result = await db.execute(
-            select(Content).where(Content.id.in_(content_ids))
+    interaction_query = await db.execute(
+        select(
+            func.count(InteractionRecord.id).label("total_interactions"),
+            func.coalesce(
+                func.sum(case((InteractionRecord.is_correct.is_(True), 1), else_=0)),
+                0,
+            ).label("correct_interactions"),
         )
-        contents = result.scalars().all()
-        for content in contents:
-            if content.theme_topic:
-                theme_counts[content.theme_topic] += 1
+        .join(PlayHistory, InteractionRecord.play_history_id == PlayHistory.id)
+        .where(PlayHistory.child_id == child.id)
+        .where(PlayHistory.started_at >= start_dt)
+    )
+    interaction_row = interaction_query.one()
+    total_interactions = int(interaction_row.total_interactions or 0)
+    correct_interactions = int(interaction_row.correct_interactions or 0)
+    interaction_rate = (
+        correct_interactions / total_interactions if total_interactions > 0 else 0.0
+    )
 
-    top_themes = sorted(
-        [ThemeStats(theme=t, count=c) for t, c in theme_counts.items()],
-        key=lambda x: x.count,
-        reverse=True,
-    )[:3]
+    themes_query = await db.execute(
+        select(
+            Content.theme_topic,
+            func.count(PlayHistory.id).label("count"),
+        )
+        .join(PlayHistory, Content.id == PlayHistory.content_id)
+        .where(
+            PlayHistory.child_id == child.id,
+            PlayHistory.started_at >= start_dt,
+            Content.theme_topic.is_not(None),
+            Content.theme_topic != "",
+        )
+        .group_by(Content.theme_topic)
+        .order_by(func.count(PlayHistory.id).desc())
+        .limit(3)
+    )
+
+    top_themes = [
+        ThemeStats(theme=row.theme_topic, count=int(row.count or 0))
+        for row in themes_query.all()
+    ]
+
+    summary = LearningStatsSummary(
+        total_duration_minutes=total_duration_minutes,
+        total_books=total_books,
+        total_songs=total_songs,
+        total_videos=total_videos,
+        streak_days=streak_days,
+        interaction_rate=round(interaction_rate, 2),
+    )
 
     return LearningStatsResponse(
         period=LearningStatsPeriod(
@@ -481,14 +818,7 @@ async def get_learning_stats(
             end_date=today.isoformat(),
             days=days,
         ),
-        summary=LearningStatsSummary(
-            total_duration_minutes=total_duration,
-            total_books=total_books,
-            total_songs=total_songs,
-            total_videos=total_videos,
-            streak_days=streak_days,
-            interaction_rate=round(interaction_rate, 2),
-        ),
+        summary=summary,
         daily_activity=daily_activity,
         top_themes=top_themes,
     )
