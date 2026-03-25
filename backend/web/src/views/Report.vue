@@ -42,7 +42,7 @@
             <span class="text-2xl">🕐</span>
           </div>
           <div class="text-3xl font-bold text-gray-900">
-            {{ formatDuration(stats?.total_duration_minutes || 0) }}
+            {{ formatDuration(stats?.summary.total_duration_minutes || 0) }}
           </div>
           <p class="text-sm text-gray-500 mt-1">
             {{ rangeLabel }}
@@ -56,7 +56,7 @@
             <span class="text-2xl">🔥</span>
           </div>
           <div class="text-3xl font-bold text-gray-900">
-            {{ stats?.streak_days || 0 }} <span class="text-lg font-normal">天</span>
+            {{ stats?.summary.streak_days || 0 }} <span class="text-lg font-normal">天</span>
           </div>
           <p class="text-sm text-gray-500 mt-1">
             保持每日学习习惯
@@ -73,9 +73,9 @@
             {{ totalContent }}
           </div>
           <div class="flex gap-4 text-sm text-gray-500 mt-1">
-            <span>绘本 {{ stats?.total_books || 0 }}</span>
-            <span>儿歌 {{ stats?.total_songs || 0 }}</span>
-            <span>视频 {{ stats?.total_videos || 0 }}</span>
+            <span>绘本 {{ stats?.summary.total_books || 0 }}</span>
+            <span>儿歌 {{ stats?.summary.total_songs || 0 }}</span>
+            <span>视频 {{ stats?.summary.total_videos || 0 }}</span>
           </div>
         </div>
       </div>
@@ -134,7 +134,24 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import * as echarts from 'echarts'
+// ECharts 按需引入 - 只加载柱状图和饼图，约 200KB vs 全量 1MB
+import * as echarts from 'echarts/core'
+import { BarChart, PieChart } from 'echarts/charts'
+import {
+  TitleComponent,
+  TooltipComponent,
+  GridComponent,
+  LegendComponent,
+} from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import { graphic } from 'echarts/core'
+
+echarts.use([
+  BarChart, PieChart,
+  TitleComponent, TooltipComponent, GridComponent, LegendComponent,
+  CanvasRenderer,
+])
+
 import { useChildStore } from '@/stores/child'
 import { getLearningStats } from '@/api/play'
 import type { LearningStats } from '@/api/types'
@@ -145,7 +162,7 @@ const childStore = useChildStore()
 const timeRanges = [
   { value: 7, label: '近7天' },
   { value: 30, label: '近30天' },
-  { value: 0, label: '全部' },
+  { value: 365, label: '近1年' },
 ]
 
 const selectedRange = ref(7)
@@ -166,7 +183,7 @@ const rangeLabel = computed(() => {
 
 const totalContent = computed(() => {
   if (!stats.value) return 0
-  return stats.value.total_books + stats.value.total_songs + stats.value.total_videos
+  return stats.value.summary.total_books + stats.value.summary.total_songs + stats.value.summary.total_videos
 })
 
 // 格式化时长
@@ -180,8 +197,8 @@ function formatDuration(minutes: number): string {
 }
 
 // 获取日历格子样式
-function getDayClass(day: { has_activity: boolean; duration_minutes: number }) {
-  if (!day.has_activity || day.duration_minutes === 0) {
+function getDayClass(day: { duration_minutes: number; contents_count: number }) {
+  if (day.contents_count === 0 || day.duration_minutes === 0) {
     return 'bg-gray-100 text-gray-400'
   }
   if (day.duration_minutes < 30) {
@@ -242,7 +259,7 @@ function initBarChart() {
         type: 'bar',
         data: durations,
         itemStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          color: new graphic.LinearGradient(0, 0, 0, 1, [
             { offset: 0, color: '#8b5cf6' },
             { offset: 1, color: '#a78bfa' },
           ]),
@@ -250,7 +267,7 @@ function initBarChart() {
         },
         emphasis: {
           itemStyle: {
-            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            color: new graphic.LinearGradient(0, 0, 0, 1, [
               { offset: 0, color: '#7c3aed' },
               { offset: 1, color: '#8b5cf6' },
             ]),
@@ -272,9 +289,9 @@ function initPieChart() {
   pieChart = echarts.init(pieChartRef.value)
 
   const data = [
-    { value: stats.value.total_books, name: '绘本' },
-    { value: stats.value.total_songs, name: '儿歌' },
-    { value: stats.value.total_videos, name: '视频' },
+    { value: stats.value.summary.total_books, name: '绘本' },
+    { value: stats.value.summary.total_songs, name: '儿歌' },
+    { value: stats.value.summary.total_videos, name: '视频' },
   ].filter(d => d.value > 0)
 
   // 如果没有数据，显示空状态
@@ -345,7 +362,7 @@ async function fetchStats() {
   loading.value = true
 
   try {
-    const days = selectedRange.value === 0 ? undefined : selectedRange.value
+    const days = selectedRange.value
     stats.value = await getLearningStats(childStore.currentChild.id, days)
 
     // 等待 DOM 更新后初始化图表

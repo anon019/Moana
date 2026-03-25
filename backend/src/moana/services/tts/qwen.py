@@ -4,7 +4,7 @@
 使用 WebSocket API (qwen3-tts-flash-realtime) 支持完整音色列表。
 API 文档: https://help.aliyun.com/zh/model-studio/qwen-tts-realtime
 
-生成的音频会自动保存到本地存储（example.com），
+生成的音频会自动保存到配置的媒体存储地址，
 避免微信小程序的合法域名限制问题。
 """
 import asyncio
@@ -217,7 +217,7 @@ class QwenTTSService(BaseTTSService):
             text: 原始文本（用于生成唯一文件名）
 
         Returns:
-            本地存储 URL (https://example.com/media/audio/...)
+            本地存储 URL (配置的 media 地址，例如 /media/audio/...)
         """
         # 生成唯一的文件名（基于文本内容的哈希）
         text_hash = hashlib.md5(text.encode()).hexdigest()[:12]

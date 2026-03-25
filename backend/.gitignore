@@ -60,3 +60,9 @@ CLAUDE.md
 backups/
 uv.lock
 web/docs/
+# Web build and local env
+web/dist/
+web/.env
+web/.env.local
+web/.env.*.local
+

@@ -3,8 +3,11 @@
 
 为绘本、儿歌、视频提供统一的风格参数管理。
 """
+import logging
 from dataclasses import dataclass, field
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 # ========== 风格配置数据类 ==========
@@ -13,8 +16,8 @@ from typing import Optional
 class ProtagonistStyle:
     """主角风格配置."""
     animal: str = "bunny"
-    color: str = "white"
-    accessory: str = "blue overalls"
+    color: str = "white"  # 实际默认色由 get_default_color() 按动物类型决定
+    accessory: str | None = None
 
 
 @dataclass
@@ -75,39 +78,61 @@ PROTAGONIST_ANIMALS = {
         "name": "小兔子",
         "prompt": "bunny character with pink inner ears",
         "default_color": "white",
-        "default_accessory": "blue overalls",
     },
     "bear": {
         "name": "小熊",
         "prompt": "bear cub character",
         "default_color": "brown",
-        "default_accessory": "yellow scarf",
     },
     "cat": {
         "name": "小猫",
         "prompt": "cat character with whiskers",
         "default_color": "orange tabby",
-        "default_accessory": "red bow",
     },
     "dog": {
         "name": "小狗",
         "prompt": "puppy character with floppy ears",
         "default_color": "golden",
-        "default_accessory": "blue collar",
     },
     "panda": {
         "name": "小熊猫",
         "prompt": "panda character with round ears",
         "default_color": "black and white",
-        "default_accessory": "bamboo",
     },
     "fox": {
         "name": "小狐狸",
         "prompt": "fox character with a fluffy tail",
         "default_color": "orange",
-        "default_accessory": "green vest",
+    },
+    "elephant": {
+        "name": "小象",
+        "prompt": "baby elephant character with big floppy ears",
+        "default_color": "gray",
+    },
+    "monkey": {
+        "name": "小猴子",
+        "prompt": "monkey character with a curly tail",
+        "default_color": "brown",
+    },
+    "penguin": {
+        "name": "小企鹅",
+        "prompt": "penguin character with a round belly",
+        "default_color": "black and white",
     },
 }
+
+
+def get_default_color(animal: str) -> str:
+    """根据动物类型获取自然默认颜色.
+
+    避免所有动物都 fallback 到 white，让每种动物有符合常识的默认颜色。
+    """
+    animal_config = PROTAGONIST_ANIMALS.get(animal)
+    if animal_config:
+        return animal_config["default_color"]
+    logger.warning("未知动物类型 '%s'，使用默认颜色 white", animal)
+    return "white"
+
 
 # ========== 配饰映射 ==========
 
@@ -221,9 +246,13 @@ VIDEO_MOTION_STYLES = {
 def build_protagonist_prompt(style: ProtagonistStyle) -> str:
     """构建主角的图像提示词."""
     animal_info = PROTAGONIST_ANIMALS.get(style.animal, PROTAGONIST_ANIMALS["bunny"])
-    accessory_info = ACCESSORIES.get(style.accessory, ACCESSORIES["blue overalls"])
 
-    return f"a cute {style.color} {animal_info['prompt']}, {accessory_info['prompt']}"
+    base = f"a cute {style.color} {animal_info['prompt']}"
+    if style.accessory:
+        accessory_info = ACCESSORIES.get(style.accessory)
+        if accessory_info:
+            base += f", {accessory_info['prompt']}"
+    return base
 
 
 def build_art_style_prompt(art_style: str, color_palette: str) -> tuple[str, str]:
@@ -285,7 +314,7 @@ def get_style_options() -> dict:
                 "name": val["name"],
                 "name_en": val["name_en"],
                 "description": f"使用{val['name']}风格绘制",
-                "preview_url": f"https://example.com/static/styles/{key}.jpg",
+                "preview_url": f"/static/styles/{key}.jpg",
                 "recommended": key == "pixar_3d",
             }
             for key, val in ART_STYLE_PROMPTS.items()
@@ -295,8 +324,7 @@ def get_style_options() -> dict:
                 "animal": key,
                 "name": val["name"],
                 "default_color": val["default_color"],
-                "default_accessory": val["default_accessory"],
-                "preview_url": f"https://example.com/static/characters/{key}.jpg",
+                "preview_url": f"/static/characters/{key}.jpg",
             }
             for key, val in PROTAGONIST_ANIMALS.items()
         ],

@@ -274,7 +274,7 @@ class WanxImageService(BaseImageService):
             prompt: 原始提示词（用于生成唯一文件名）
 
         Returns:
-            本地存储 URL (https://example.com/media/image/...)
+            本地存储 URL (配置的 media 地址，例如 /media/images/...)
         """
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.get(remote_url)
