@@ -1,1 +1,15 @@
-Generic single-database configuration.
+Alembic migrations for the Moana backend.
+
+Apply the latest schema:
+
+```bash
+alembic upgrade head
+```
+
+Create a new revision:
+
+```bash
+alembic revision -m "describe change"
+```
+
+Migration files are stored in `alembic/versions/`. Recent revisions include play history and interaction tracking tables used by the backend learning flow.
