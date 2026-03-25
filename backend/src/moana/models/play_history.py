@@ -1,10 +1,8 @@
-# src/moana/models/play_history.py
 """播放历史和答题记录模型."""
-import uuid
-from datetime import datetime
+from datetime import datetime, timezone
+from uuid import uuid4
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Boolean, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Boolean, Index, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from moana.models.base import Base, TimestampMixin
@@ -18,19 +16,26 @@ class PlayHistory(Base, TimestampMixin):
 
     __tablename__ = "play_histories"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
+    __table_args__ = (
+        Index("ix_play_histories_child_started_at", "child_id", "started_at"),
+        Index("ix_play_histories_child_last_played_at", "child_id", "last_played_at"),
+        Index("ix_play_histories_child_content_type", "child_id", "content_type"),
+        Index("ix_play_histories_child_content_completed_last_played", "child_id", "content_id", "completed_at", "last_played_at"),
     )
-    child_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid4()),
+    )
+    child_id: Mapped[str] = mapped_column(
+        String(36),
         ForeignKey("children.id"),
         nullable=False,
         index=True,
     )
-    content_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+    content_id: Mapped[str] = mapped_column(
+        String(36),
         ForeignKey("contents.id"),
         nullable=False,
         index=True,
@@ -84,14 +89,14 @@ class PlayHistory(Base, TimestampMixin):
         """更新播放进度."""
         self.current_page = current_page
         self.completion_rate = current_page / self.total_pages if self.total_pages > 0 else 0.0
-        self.last_played_at = datetime.now()
+        self.last_played_at = datetime.now(timezone.utc)
 
     def mark_completed(self) -> None:
         """标记为已完成."""
         self.current_page = self.total_pages
         self.completion_rate = 1.0
-        self.completed_at = datetime.now()
-        self.last_played_at = datetime.now()
+        self.completed_at = datetime.now(timezone.utc)
+        self.last_played_at = datetime.now(timezone.utc)
 
     @property
     def is_completed(self) -> bool:
@@ -105,7 +110,7 @@ class PlayHistory(Base, TimestampMixin):
         return (end_time - self.started_at).total_seconds()
 
 
-class InteractionRecord(Base):
+class InteractionRecord(Base, TimestampMixin):
     """答题记录.
 
     记录孩子在播放过程中的答题情况。
@@ -113,13 +118,18 @@ class InteractionRecord(Base):
 
     __tablename__ = "interaction_records"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
+    __table_args__ = (
+        Index("ix_interaction_records_play_history_question_type", "play_history_id", "question_type"),
+        Index("ix_interaction_records_play_history_is_correct", "play_history_id", "is_correct"),
     )
-    play_history_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid4()),
+    )
+    play_history_id: Mapped[str] = mapped_column(
+        String(36),
         ForeignKey("play_histories.id"),
         nullable=False,
         index=True,
