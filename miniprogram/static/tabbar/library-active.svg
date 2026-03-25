@@ -1,0 +1,32 @@
+<svg width="81" height="81" viewBox="0 0 81 81" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 内容库图标 - 选中状态 -->
+  <defs>
+    <linearGradient id="book1Grad" x1="10" y1="22" x2="38" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4ECDC4"/>
+      <stop offset="100%" stop-color="#45B7AA"/>
+    </linearGradient>
+    <linearGradient id="book2Grad" x1="28" y1="18" x2="56" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF8A80"/>
+      <stop offset="100%" stop-color="#FF6B6B"/>
+    </linearGradient>
+    <linearGradient id="book3Grad" x1="42" y1="24" x2="68" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFE66D"/>
+      <stop offset="100%" stop-color="#FFD93D"/>
+    </linearGradient>
+  </defs>
+  <!-- 第一本书 - 青绿色 -->
+  <rect x="10" y="22" width="28" height="38" rx="3"
+        transform="rotate(-8 10 22)"
+        fill="url(#book1Grad)"/>
+  <!-- 第二本书 - 珊瑚红 -->
+  <rect x="28" y="18" width="28" height="42" rx="3"
+        fill="url(#book2Grad)"/>
+  <!-- 第三本书 - 明黄色 -->
+  <rect x="42" y="24" width="26" height="36" rx="3"
+        transform="rotate(6 42 24)"
+        fill="url(#book3Grad)"/>
+  <!-- 书脊装饰线 - 白色 -->
+  <line x1="42" y1="22" x2="42" y2="58" stroke="#FFFFFF" stroke-width="2" opacity="0.7"/>
+  <!-- 小心形装饰 -->
+  <path d="M42 32c0-2.2 3-4 3-2s-3 4-3 4-3-2-3-4 3 0 3 2z" fill="#FFFFFF" opacity="0.8"/>
+</svg>

@@ -1,0 +1,21 @@
+<svg width="81" height="81" viewBox="0 0 81 81" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 首页图标 - 小房子造型，圆润可爱风格 -->
+  <path d="M40.5 12L12 35v34a6 6 0 006 6h45a6 6 0 006-6V35L40.5 12z"
+        fill="none"
+        stroke="#B2BEC3"
+        stroke-width="4"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+  <!-- 门 -->
+  <rect x="32" y="48" width="17" height="27" rx="3"
+        fill="none"
+        stroke="#B2BEC3"
+        stroke-width="3.5"/>
+  <!-- 门把手 -->
+  <circle cx="44" cy="62" r="2" fill="#B2BEC3"/>
+  <!-- 烟囱 -->
+  <rect x="52" y="18" width="10" height="18" rx="2"
+        fill="none"
+        stroke="#B2BEC3"
+        stroke-width="3"/>
+</svg>

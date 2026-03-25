@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Moana TabBar 图标预览</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #FFF9F0 0%, #FFE8E8 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+    h1 {
+      text-align: center;
+      color: #FF6B6B;
+      margin-bottom: 10px;
+      font-size: 28px;
+    }
+    .subtitle {
+      text-align: center;
+      color: #B2BEC3;
+      margin-bottom: 40px;
+      font-size: 14px;
+    }
+    .icons-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 30px;
+      max-width: 800px;
+      margin: 0 auto 60px;
+    }
+    .icon-card {
+      background: white;
+      border-radius: 20px;
+      padding: 20px;
+      text-align: center;
+      box-shadow: 0 8px 30px rgba(255, 107, 107, 0.15);
+    }
+    .icon-card h3 {
+      color: #636e72;
+      font-size: 14px;
+      margin-bottom: 15px;
+    }
+    .icon-wrapper {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      align-items: center;
+    }
+    .icon-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    .icon-item span {
+      font-size: 11px;
+      color: #B2BEC3;
+    }
+    .icon-item img {
+      width: 54px;
+      height: 54px;
+    }
+
+    /* TabBar 模拟 */
+    .tabbar-demo {
+      max-width: 400px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 30px 30px 0 0;
+      padding: 15px 0 25px;
+      box-shadow: 0 -4px 30px rgba(0,0,0,0.1);
+    }
+    .tabbar-demo h2 {
+      text-align: center;
+      color: #636e72;
+      font-size: 14px;
+      margin-bottom: 20px;
+    }
+    .tabbar-items {
+      display: flex;
+      justify-content: space-around;
+    }
+    .tabbar-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .tabbar-item:hover {
+      transform: scale(1.1);
+    }
+    .tabbar-item img {
+      width: 27px;
+      height: 27px;
+    }
+    .tabbar-item span {
+      font-size: 10px;
+      color: #B2BEC3;
+    }
+    .tabbar-item.active span {
+      color: #FF6B6B;
+    }
+
+    .note {
+      max-width: 600px;
+      margin: 40px auto 0;
+      padding: 20px;
+      background: rgba(255,255,255,0.8);
+      border-radius: 12px;
+      font-size: 13px;
+      color: #636e72;
+      line-height: 1.8;
+    }
+    .note h4 {
+      color: #FF6B6B;
+      margin-bottom: 10px;
+    }
+    .note code {
+      background: #f8f9fa;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <h1>🌊 Moana TabBar 图标</h1>
+  <p class="subtitle">温暖、童趣、充满创意的早教小程序图标</p>
+
+  <div class="icons-grid">
+    <div class="icon-card">
+      <h3>首页</h3>
+      <div class="icon-wrapper">
+        <div class="icon-item">
+          <img src="home.svg" alt="首页">
+          <span>默认</span>
+        </div>
+        <div class="icon-item">
+          <img src="home-active.svg" alt="首页-选中">
+          <span>选中</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="icon-card">
+      <h3>创作</h3>
+      <div class="icon-wrapper">
+        <div class="icon-item">
+          <img src="create.svg" alt="创作">
+          <span>默认</span>
+        </div>
+        <div class="icon-item">
+          <img src="create-active.svg" alt="创作-选中">
+          <span>选中</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="icon-card">
+      <h3>内容库</h3>
+      <div class="icon-wrapper">
+        <div class="icon-item">
+          <img src="library.svg" alt="内容库">
+          <span>默认</span>
+        </div>
+        <div class="icon-item">
+          <img src="library-active.svg" alt="内容库-选中">
+          <span>选中</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="icon-card">
+      <h3>我的</h3>
+      <div class="icon-wrapper">
+        <div class="icon-item">
+          <img src="profile.svg" alt="我的">
+          <span>默认</span>
+        </div>
+        <div class="icon-item">
+          <img src="profile-active.svg" alt="我的-选中">
+          <span>选中</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tabbar-demo">
+    <h2>TabBar 效果预览</h2>
+    <div class="tabbar-items">
+      <div class="tabbar-item active">
+        <img src="home-active.svg" alt="首页">
+        <span>首页</span>
+      </div>
+      <div class="tabbar-item">
+        <img src="create.svg" alt="创作">
+        <span>创作</span>
+      </div>
+      <div class="tabbar-item">
+        <img src="library.svg" alt="内容库">
+        <span>内容库</span>
+      </div>
+      <div class="tabbar-item">
+        <img src="profile.svg" alt="我的">
+        <span>我的</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <h4>📌 使用说明</h4>
+    <p>微信小程序 TabBar 需要 PNG 格式图标（建议 81×81px）。你可以：</p>
+    <ol>
+      <li>使用在线工具如 <a href="https://svgtopng.com" target="_blank">svgtopng.com</a> 批量转换</li>
+      <li>或在 Figma/Sketch 中导入 SVG 后导出 PNG</li>
+      <li>将 PNG 文件放到 <code>static/tabbar/</code> 目录</li>
+    </ol>
+    <p style="margin-top:10px">图标颜色说明：默认 <code>#B2BEC3</code>，选中 <code>#FF6B6B</code>（珊瑚红）</p>
+  </div>
+
+  <script>
+    // 点击切换选中状态
+    document.querySelectorAll('.tabbar-item').forEach((item, index) => {
+      item.addEventListener('click', () => {
+        document.querySelectorAll('.tabbar-item').forEach((i, idx) => {
+          const img = i.querySelector('img');
+          const icons = ['home', 'create', 'library', 'profile'];
+          if (idx === index) {
+            i.classList.add('active');
+            img.src = `${icons[idx]}-active.svg`;
+          } else {
+            i.classList.remove('active');
+            img.src = `${icons[idx]}.svg`;
+          }
+        });
+      });
+    });
+  </script>
+</body>
+</html>

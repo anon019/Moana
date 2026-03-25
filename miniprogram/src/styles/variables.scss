@@ -1,0 +1,178 @@
+// ============================================
+// Moana 设计系统 - 温暖童话花园风格
+// Warm Storybook Garden Theme
+// ============================================
+
+// === 核心色彩系统 ===
+// 主背景色 - 温暖奶油调
+$bg-cream: #FFFBF7;              // 主页面背景
+$bg-warm: #FFF8F2;               // 温暖背景
+$bg-soft: #FEF6EE;               // 柔和背景
+$bg-card: #FFFFFF;               // 卡片背景
+$bg-elevated: #FFFFFF;           // 悬浮元素背景
+$bg-base: $bg-cream;             // 别名 - 向后兼容
+
+// 向后兼容变量（旧主题别名）
+$glass-bg: rgba($bg-card, 0.95);
+$glass-bg-light: rgba($bg-card, 0.9);
+$glass-border: rgba(61, 41, 20, 0.06);
+$glass-border-light: rgba(61, 41, 20, 0.08);
+
+// 棕色文字系统 - 温暖不刺眼
+$text-primary: #3D2914;          // 主文字 - 巧克力棕
+$text-secondary: #6B5344;        // 次要文字 - 咖啡棕
+$text-tertiary: #9C8578;         // 辅助文字 - 浅咖啡
+$text-placeholder: #C4B5A9;      // 占位文字
+$text-white: #FFFFFF;            // 白色文字
+$text-on-dark: #FFFBF7;          // 深色背景上的文字
+$text-light: $text-tertiary;     // 别名 - 向后兼容
+
+// === 内容类型专属色彩 ===
+// 绘本：温暖珊瑚色系
+$book-primary: #FF7B54;          // 主色 - 温暖珊瑚
+$book-secondary: #FF9B7A;        // 次要色
+$book-light: #FFE8E0;            // 浅色背景
+$book-gradient: linear-gradient(135deg, #FF7B54 0%, #FF9B7A 50%, #FFBDA8 100%);
+$book-bg: linear-gradient(145deg, #FFF5F0 0%, #FFE8E0 100%);
+$book-shadow: 0 8rpx 24rpx rgba(255, 123, 84, 0.2);
+
+// 儿歌：清新鼠尾草绿
+$song-primary: #7FB285;          // 主色 - 鼠尾草绿
+$song-secondary: #9EC5A3;        // 次要色
+$song-light: #E8F5E9;            // 浅色背景
+$song-gradient: linear-gradient(135deg, #7FB285 0%, #9EC5A3 50%, #C8E6C9 100%);
+$song-bg: linear-gradient(145deg, #F1F8F2 0%, #E8F5E9 100%);
+$song-shadow: 0 8rpx 24rpx rgba(127, 178, 133, 0.2);
+
+// 视频：金色琥珀
+$video-primary: #F5A623;         // 主色 - 金色琥珀
+$video-secondary: #FFBE4D;       // 次要色
+$video-light: #FFF3D6;           // 浅色背景
+$video-gradient: linear-gradient(135deg, #F5A623 0%, #FFBE4D 50%, #FFD980 100%);
+$video-bg: linear-gradient(145deg, #FFFBF0 0%, #FFF3D6 100%);
+$video-shadow: 0 8rpx 24rpx rgba(245, 166, 35, 0.2);
+
+// === 主色调 ===
+$primary: #FF7B54;               // 主强调色 - 温暖珊瑚
+$primary-light: #FF9B7A;         // 浅主色
+$primary-dark: #E86A45;          // 深主色
+$secondary: #7FB285;             // 辅助色 - 鼠尾草绿
+$secondary-light: #9EC5A3;       // 浅辅助色
+$accent: #F5A623;                // 点缀色 - 金色琥珀
+$accent-soft: #FFE4A8;           // 柔和点缀
+
+// === 功能色 ===
+$success: #7FB285;               // 成功 - 鼠尾草绿
+$warning: #F5A623;               // 警告 - 琥珀
+$error: #E85D4A;                 // 错误 - 温暖红
+$info: #5BA4D9;                  // 信息 - 天蓝
+
+// === 渐变系统 ===
+$gradient-page: linear-gradient(180deg, $bg-cream 0%, $bg-warm 100%);
+$gradient-warm: linear-gradient(180deg, #FFFBF7 0%, #FFF5EB 100%);
+$gradient-card: linear-gradient(145deg, #FFFFFF 0%, #FFFBF7 100%);
+$gradient-primary: linear-gradient(135deg, $primary 0%, $primary-light 100%);
+$gradient-secondary: linear-gradient(135deg, $secondary 0%, $secondary-light 100%);
+$gradient-accent: linear-gradient(135deg, $accent 0%, #FFBE4D 100%);
+// 梦幻多彩渐变
+$gradient-dreamy: linear-gradient(135deg, #FFE8E0 0%, #E8F5E9 50%, #FFF3D6 100%);
+$gradient-soft: linear-gradient(145deg, rgba(255,255,255,0.95) 0%, rgba(255,251,247,0.9) 100%);
+
+// === 阴影系统 - 温暖色调 ===
+$shadow-xs: 0 2rpx 4rpx rgba(61, 41, 20, 0.04);
+$shadow-sm: 0 2rpx 8rpx rgba(61, 41, 20, 0.06);
+$shadow-md: 0 4rpx 16rpx rgba(61, 41, 20, 0.08);
+$shadow-lg: 0 8rpx 32rpx rgba(61, 41, 20, 0.1);
+$shadow-xl: 0 12rpx 48rpx rgba(61, 41, 20, 0.12);
+$shadow-card: 0 4rpx 20rpx rgba(61, 41, 20, 0.06);
+$shadow-button: 0 4rpx 16rpx rgba(255, 123, 84, 0.25);
+$shadow-float: 0 8rpx 32rpx rgba(61, 41, 20, 0.1);
+$shadow-soft: 0 4rpx 12rpx rgba(61, 41, 20, 0.05);
+// 内容类型专属阴影
+$shadow-colored-book: 0 6rpx 20rpx rgba(255, 123, 84, 0.2);
+$shadow-colored-song: 0 6rpx 20rpx rgba(127, 178, 133, 0.2);
+$shadow-colored-video: 0 6rpx 20rpx rgba(245, 166, 35, 0.2);
+
+// === 边框系统 ===
+$border-light: rgba(61, 41, 20, 0.06);
+$border-medium: rgba(61, 41, 20, 0.1);
+$border-strong: rgba(61, 41, 20, 0.15);
+$border-card: 1rpx solid rgba(61, 41, 20, 0.06);
+
+// === 圆角系统 ===
+$radius-xs: 8rpx;                // 小标签
+$radius-sm: 12rpx;               // 小按钮
+$radius-md: 20rpx;               // 中等元素
+$radius-lg: 28rpx;               // 卡片
+$radius-xl: 36rpx;               // 大按钮
+$radius-2xl: 48rpx;              // 超大圆角
+$radius-full: 999rpx;            // 圆形
+// 有机圆角 - 更自然的感觉
+$radius-organic: 28rpx 36rpx 28rpx 36rpx;
+$radius-blob: 60% 40% 55% 45% / 55% 45% 55% 45%;
+
+// === 间距系统 ===
+$spacing-xs: 8rpx;
+$spacing-sm: 16rpx;
+$spacing-md: 24rpx;
+$spacing-lg: 32rpx;
+$spacing-xl: 48rpx;
+$spacing-2xl: 64rpx;
+
+// === 字体大小 ===
+$font-xs: 22rpx;                 // 小标签
+$font-sm: 24rpx;                 // 说明文字
+$font-base: 28rpx;               // 正文
+$font-md: 32rpx;                 // 卡片标题
+$font-lg: 36rpx;                 // 小标题
+$font-xl: 40rpx;                 // 页面标题
+$font-xxl: 48rpx;                // 大标题
+$font-hero: 56rpx;               // 主视觉标题
+
+// === 字体粗细 ===
+$font-normal: 400;
+$font-medium: 500;
+$font-semibold: 600;
+$font-bold: 700;
+
+// === 行高 ===
+$line-height-tight: 1.25;
+$line-height-base: 1.5;
+$line-height-loose: 1.75;
+
+// === 动画时长 ===
+$duration-fast: 150ms;
+$duration-base: 250ms;
+$duration-slow: 350ms;
+$duration-slower: 500ms;
+
+// === 动画曲线 ===
+$ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+$ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
+$ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+$ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+$ease-soft: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+
+// === Z-index 层级 ===
+$z-base: 1;
+$z-dropdown: 100;
+$z-sticky: 200;
+$z-fixed: 300;
+$z-modal: 500;
+$z-toast: 1000;
+
+// === 安全区域 ===
+$safe-top: env(safe-area-inset-top);
+$safe-bottom: env(safe-area-inset-bottom);
+
+// === 固定尺寸（防止右侧截断）===
+$page-width: 750rpx;
+$content-padding: 32rpx;
+$content-width: calc(750rpx - 64rpx);
+
+// === TabBar 相关 ===
+$tabbar-height: 100rpx;
+$tabbar-bg: #FFFFFF;
+$tabbar-border: rgba(61, 41, 20, 0.08);
+$tabbar-text: #9C8578;           // 未选中文字
+$tabbar-text-active: #FF7B54;    // 选中文字

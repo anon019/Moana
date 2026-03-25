@@ -1,0 +1,44 @@
+/**
+ * Moana 全局样式入口
+ * 这里的样式会被编译到每个页面
+ */
+
+// ============================================
+// uni-app 原生变量覆盖 (适配 Moana 风格)
+// ============================================
+
+/* 行为相关颜色 */
+$uni-color-primary: #FF6B6B;
+$uni-color-success: #00B894;
+$uni-color-warning: #FDCB6E;
+$uni-color-error: #E17055;
+
+/* 文字基本颜色 */
+$uni-text-color: #2D3436;
+$uni-text-color-inverse: #FFFFFF;
+$uni-text-color-grey: #636E72;
+$uni-text-color-placeholder: #B2BEC3;
+$uni-text-color-disable: #DFE6E9;
+
+/* 背景颜色 */
+$uni-bg-color: #FFFFFF;
+$uni-bg-color-grey: #FFF9F0;
+$uni-bg-color-hover: #FFF5E6;
+$uni-bg-color-mask: rgba(45, 52, 54, 0.5);
+
+/* 边框颜色 */
+$uni-border-color: #DFE6E9;
+
+/* Border Radius */
+$uni-border-radius-sm: 8rpx;
+$uni-border-radius-base: 16rpx;
+$uni-border-radius-lg: 24rpx;
+$uni-border-radius-circle: 50%;
+
+// ============================================
+// 引入设计系统
+// ============================================
+@import '@/styles/variables.scss';
+
+// 引入公共样式
+@import '@/styles/common.scss';
