@@ -121,3 +121,8 @@ media/
 # === Alembic ===
 # Keep migration files, but ignore temp
 alembic/tmp/
+# === Backend local workspace artifacts ===
+backend/CLAUDE.md
+backend/backups/
+backend/uv.lock
+backend/web/docs/
