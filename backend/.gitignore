@@ -54,3 +54,9 @@ htmlcov/
 .DS_Store
 Thumbs.db
 web/node_modules/
+
+# Local workspace artifacts
+CLAUDE.md
+backups/
+uv.lock
+web/docs/
