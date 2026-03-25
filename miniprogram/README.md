@@ -26,8 +26,8 @@ Moana 儿童教育平台的微信小程序客户端，基于 uni-app + Vue 3 + T
 - **内容筛选** - 按内容类型快速筛选
 
 ### 用户功能
-- **学习报告** - 学习时长统计、内容分析
-- **设置中心** - 账号管理、消息通知设置
+- **个人中心** - 账号入口、孩子信息管理
+- **问题反馈** - 提交使用问题和产品建议
 
 ## 🛠️ 技术栈
 
@@ -125,50 +125,51 @@ miniprogram/
 │   ├── pages/                    # 页面目录
 │   │   ├── index/               # 首页
 │   │   ├── create/              # 创作相关页面
+│   │   │   ├── index.vue        # 创作首页
 │   │   │   ├── picture-book.vue # 绘本创作
 │   │   │   ├── nursery-rhyme.vue # 儿歌创作
 │   │   │   ├── video.vue        # 视频创作
-│   │   │   └── smart-creation.vue # 智能创作
+│   │   │   └── smart.vue        # 智能创作
 │   │   ├── play/                # 播放器页面
 │   │   │   ├── picture-book.vue # 绘本播放器
 │   │   │   ├── nursery-rhyme.vue # 儿歌播放器
 │   │   │   └── video.vue        # 视频播放器
 │   │   ├── library/             # 内容库
 │   │   ├── favorites/           # 收藏
-│   │   ├── kids-mode/           # 儿童模式
-│   │   ├── reports/             # 学习报告
-│   │   ├── settings/            # 设置
-│   │   └── my/                  # 我的
+│   │   ├── child/               # 儿童模式
+│   │   ├── feedback/            # 问题反馈
+│   │   └── profile/             # 个人中心
 │   │
 │   ├── components/              # 公共组件
-│   │   ├── content-card/        # 内容卡片
-│   │   ├── loading-overlay/     # 加载遮罩
+│   │   ├── ContentCard/         # 内容卡片
+│   │   ├── LoadingState/        # 加载状态
 │   │   └── ...
 │   │
 │   ├── api/                     # API 接口
 │   │   ├── auth.ts              # 认证相关
 │   │   ├── content.ts           # 内容相关
 │   │   ├── favorite.ts          # 收藏相关
+│   │   ├── feedback.ts          # 反馈相关
 │   │   ├── play.ts              # 播放相关
 │   │   └── request.ts           # 请求封装
 │   │
 │   ├── stores/                  # Pinia 状态管理
 │   │   ├── user.ts              # 用户状态
 │   │   ├── content.ts           # 内容状态
-│   │   └── player.ts            # 播放器状态
+│   │   ├── favorite.ts          # 收藏状态
+│   │   └── child.ts             # 儿童模式状态
 │   │
 │   ├── utils/                   # 工具函数
-│   │   ├── auth.ts              # 认证工具
+│   │   ├── cache.ts             # 缓存工具
 │   │   ├── storage.ts           # 存储工具
-│   │   └── format.ts            # 格式化工具
+│   │   ├── performance.ts       # 性能埋点/计时
+│   │   └── url.ts               # URL 工具
 │   │
 │   ├── static/                  # 静态资源
-│   │   ├── images/              # 图片
-│   │   ├── icons/               # 图标
 │   │   └── tabbar/              # 底部导航图标
 │   │
 │   ├── App.vue                  # 应用入口
-│   ├── manifest.json            # uni-app 配置
+│   ├── manifest.json.template   # uni-app 配置模板
 │   ├── pages.json               # 页面配置
 │   └── uni.scss                 # 全局样式变量
 │
@@ -176,9 +177,10 @@ miniprogram/
 │   ├── dev/                     # 开发模式
 │   └── build/                   # 生产模式
 │
-├── docs/                        # 文档目录
 ├── project.config.json          # 微信小程序配置（.gitignore）
 ├── project.private.config.json  # 私有配置（.gitignore）
+├── .env.example                 # API 地址示例配置
+├── scripts/                     # 本地配置自举脚本
 ├── vite.config.ts              # Vite 配置
 ├── tsconfig.json               # TypeScript 配置
 └── package.json                # 项目依赖
@@ -346,7 +348,7 @@ checkStatus()
 
 ```typescript
 uni.navigateTo({
-  url: '/pages/kids-mode/kids-mode'
+  url: '/pages/child/index'
 })
 ```
 
@@ -413,10 +415,10 @@ chore: 构建/工具
 
 ## 📚 相关文档
 
-- [开发完整指南](CLAUDE.md) - 详细的开发文档
-- [开发笔记](DEV-NOTES.md) - 开发过程记录
 - [敏感配置说明](README.sensitive-config.md) - AppID 配置指南
-- [产品设计文档](../docs/) - 产品功能设计
+- [.env.example](.env.example) - API 地址示例配置
+- [`src/api/request.ts`](src/api/request.ts) - 基础请求封装
+- [`src/api/`](src/api) - 业务接口定义
 
 ## 🔗 API 接口
 
@@ -431,7 +433,7 @@ chore: 构建/工具
 - `GET /favorite/list` - 收藏列表
 - `POST /favorite/add` - 添加收藏
 
-完整 API 文档请查看 [CLAUDE.md](CLAUDE.md#联调架构)
+接口封装示例见 [`src/api/content.ts`](src/api/content.ts)、[`src/api/favorite.ts`](src/api/favorite.ts) 和 [`src/api/request.ts`](src/api/request.ts)。
 
 ## 🚀 发布流程
 
@@ -445,7 +447,8 @@ chore: 构建/工具
 ## 📞 技术支持
 
 如有问题，请查看：
-- [开发指南](CLAUDE.md)
+- [敏感配置说明](README.sensitive-config.md)
+- [.env.example](.env.example)
 - [项目主 README](../README.md)
 - 提交 Issue
 
