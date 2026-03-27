@@ -4,6 +4,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import request from '@/api/request'
+import { STORAGE_KEYS, getStorageWithExpiry, setStorageWithExpiry } from '@/utils/storage'
 
 // 孩子信息接口 (与后端 ChildResponse 对齐)
 export interface Child {
@@ -17,9 +18,36 @@ export interface Child {
 }
 
 export const useChildStore = defineStore('child', () => {
+  const CHILDREN_CACHE_TTL_MINUTES = 12 * 60
   // 状态
   const children = ref<Child[]>([])
   const currentChild = ref<Child | null>(null)
+
+  function restoreChildrenFromCache() {
+    const cachedChildren = getStorageWithExpiry<Child[]>(STORAGE_KEYS.CHILDREN_CACHE) || []
+    if (!cachedChildren.length) {
+      return
+    }
+
+    children.value = cachedChildren
+
+    const savedChildId = uni.getStorageSync(STORAGE_KEYS.CURRENT_CHILD_ID)
+    if (savedChildId) {
+      const saved = cachedChildren.find(child => child.id === savedChildId)
+      if (saved) {
+        currentChild.value = saved
+        return
+      }
+    }
+
+    currentChild.value = cachedChildren[0]
+  }
+
+  function persistChildrenCache() {
+    void setStorageWithExpiry(STORAGE_KEYS.CHILDREN_CACHE, children.value, CHILDREN_CACHE_TTL_MINUTES)
+  }
+
+  restoreChildrenFromCache()
 
   // 计算属性
   const hasChild = computed(() => children.value.length > 0)
@@ -45,7 +73,7 @@ export const useChildStore = defineStore('child', () => {
   // 设置当前孩子
   function setCurrentChild(child: Child) {
     currentChild.value = child
-    uni.setStorageSync('current_child_id', child.id)
+    uni.setStorageSync(STORAGE_KEYS.CURRENT_CHILD_ID, child.id)
   }
 
   // 添加孩子 (与后端 CreateChildRequest 对齐)
@@ -64,6 +92,8 @@ export const useChildStore = defineStore('child', () => {
       setCurrentChild(child)
     }
 
+    persistChildrenCache()
+
     return child
   }
 
@@ -72,9 +102,10 @@ export const useChildStore = defineStore('child', () => {
     try {
       const res = await request.get<Child[]>('/child/list')
       children.value = res
+      persistChildrenCache()
 
       // 恢复之前选中的孩子
-      const savedChildId = uni.getStorageSync('current_child_id')
+      const savedChildId = uni.getStorageSync(STORAGE_KEYS.CURRENT_CHILD_ID)
       if (savedChildId) {
         const saved = children.value.find(c => c.id === savedChildId)
         if (saved) {
@@ -86,6 +117,8 @@ export const useChildStore = defineStore('child', () => {
       // 默认选中第一个
       if (children.value.length > 0) {
         setCurrentChild(children.value[0])
+      } else {
+        currentChild.value = null
       }
     } catch (e) {
       console.error('获取孩子列表失败:', e)

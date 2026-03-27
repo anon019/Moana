@@ -370,6 +370,7 @@ import { useChildStore } from '@/stores/child'
 import { useContentStore } from '@/stores/content'
 import type { PlayHistoryItem } from '@/api/play'
 import { getPlayHistory } from '@/api/play'
+import { STORAGE_KEYS, getStorageWithExpiry, setStorageWithExpiry } from '@/utils/storage'
 
 const userStore = useUserStore()
 const childStore = useChildStore()
@@ -379,6 +380,7 @@ const contentStore = useContentStore()
 const recentPlays = ref<PlayHistoryItem[]>([])
 const showAddChildGuide = ref(false)
 let loadDataTask: Promise<void> | null = null
+const HOME_RECENT_PLAYS_TTL_MINUTES = 30
 
 function getPlayProgress(item: PlayHistoryItem): number {
   const raw = item.progress ?? item.completion_rate ?? 0
@@ -387,6 +389,27 @@ function getPlayProgress(item: PlayHistoryItem): number {
 
 function getPlayTitle(item: PlayHistoryItem): string {
   return item.content_title || '继续播放'
+}
+
+function getRecentPlaysCacheKey(childId: string) {
+  return `${STORAGE_KEYS.HOME_RECENT_PLAYS_PREFIX}${childId}`
+}
+
+function applyRecentPlays(items: PlayHistoryItem[]) {
+  recentPlays.value = items.filter(item => getPlayProgress(item) < 1)
+}
+
+function hydrateRecentPlaysFromCache(childId?: string) {
+  if (!childId) return
+
+  const cachedItems = getStorageWithExpiry<PlayHistoryItem[]>(getRecentPlaysCacheKey(childId)) || []
+  if (!cachedItems.length) return
+
+  applyRecentPlays(cachedItems)
+}
+
+function persistRecentPlays(childId: string, items: PlayHistoryItem[]) {
+  void setStorageWithExpiry(getRecentPlaysCacheKey(childId), items, HOME_RECENT_PLAYS_TTL_MINUTES)
 }
 
 // 计算属性
@@ -577,7 +600,42 @@ function warmContentDetail(contentId?: string) {
   })
 }
 
+function warmRecentPlayContent(items: PlayHistoryItem[]) {
+  items.slice(0, 2).forEach(item => {
+    warmContentDetail(item.content_id)
+  })
+}
+
+function primePlayableLaunchContent(contentId?: string, contentType?: string) {
+  if (!contentId || !contentType) return
+
+  const cached = contentStore.getCachedContent(contentId) as any
+  if (!cached) return
+
+  contentStore.primeContentCache(cached)
+
+  if (contentType === 'picture_book' && cached.pages?.length) {
+    uni.setStorageSync('temp_picture_book', cached)
+  } else if (contentType === 'nursery_rhyme' && cached.audio_url) {
+    uni.setStorageSync('temp_nursery_rhyme', cached)
+  } else if (contentType === 'video' && cached.video_url) {
+    uni.setStorageSync('temp_video', cached)
+  }
+}
+
+async function refreshRecentPlays(childId: string) {
+  try {
+    const historyRes = await getPlayHistory(childId, { limit: 5 })
+    applyRecentPlays(historyRes.items)
+    persistRecentPlays(childId, historyRes.items)
+    warmRecentPlayContent(historyRes.items)
+  } catch (e) {
+    console.log('加载播放历史失败:', e)
+  }
+}
+
 function goToPlay(item: PlayHistoryItem) {
+  primePlayableLaunchContent(item.content_id, item.content_type)
   warmContentDetail(item.content_id)
   const contentType = item.content_type
   if (contentType === 'nursery_rhyme') {
@@ -620,9 +678,32 @@ async function loadData() {
         await userStore.login()
       }
 
-      await childStore.fetchChildren()
+      const cachedChildId = childStore.currentChild?.id || ''
+      if (cachedChildId) {
+        showAddChildGuide.value = false
+        hydrateRecentPlaysFromCache(cachedChildId)
+        warmRecentPlayContent(recentPlays.value)
+      }
 
-      if (!childStore.hasChild) {
+      const fetchChildrenTask = childStore.fetchChildren()
+
+      if (!cachedChildId) {
+        await fetchChildrenTask
+      }
+
+      const initialChildId = childStore.currentChild?.id || cachedChildId
+      if (initialChildId) {
+        showAddChildGuide.value = false
+        if (!recentPlays.value.length || initialChildId !== cachedChildId) {
+          hydrateRecentPlaysFromCache(initialChildId)
+        }
+        void refreshRecentPlays(initialChildId)
+      }
+
+      await fetchChildrenTask
+
+      const finalChildId = childStore.currentChild?.id || ''
+      if (!finalChildId) {
         showAddChildGuide.value = true
         recentPlays.value = []
         return
@@ -630,19 +711,15 @@ async function loadData() {
 
       showAddChildGuide.value = false
 
-      if (childStore.currentChild) {
-        try {
-          const historyRes = await getPlayHistory(childStore.currentChild.id, { limit: 5 })
-          recentPlays.value = historyRes.items.filter(item => getPlayProgress(item) < 1)
-        } catch (e) {
-          console.log('加载数据失败:', e)
-        }
-      } else {
-        recentPlays.value = []
+      if (finalChildId !== initialChildId) {
+        hydrateRecentPlaysFromCache(finalChildId)
+        await refreshRecentPlays(finalChildId)
       }
     } catch (e) {
       console.log('首页加载失败:', e)
-      recentPlays.value = []
+      if (!recentPlays.value.length) {
+        recentPlays.value = []
+      }
     }
   })().finally(() => {
     loadDataTask = null
