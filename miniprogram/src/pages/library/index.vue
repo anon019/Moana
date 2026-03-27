@@ -641,6 +641,7 @@ import {
   type NurseryRhymeAsset
 } from '@/api/content'
 import SkeletonCard from '@/components/SkeletonCard/SkeletonCard.vue'
+import { STORAGE_KEYS } from '@/utils/storage'
 
 const contentStore = useContentStore()
 
@@ -654,6 +655,12 @@ const filters = [
 const currentFilter = ref('all')
 const loading = ref(false)
 const hasMore = ref(true)
+let playNavigationTask: Promise<void> | null = null
+const prefetchedPlayableIds = new Set<string>()
+const queuedPlayablePrefetchIds = new Set<string>()
+const playablePrefetchQueue: PictureBook[] = []
+const MAX_PLAYABLE_PREFETCH_CONCURRENCY = 1
+let activePlayablePrefetchCount = 0
 
 const imageLoaded = ref<Record<string, boolean>>({})
 const imageFailed = ref<Record<string, boolean>>({})
@@ -804,6 +811,7 @@ async function loadData(refresh = false) {
 
     await contentStore.fetchGeneratedList(refresh)
     hasMore.value = contentStore.hasMoreContent
+    schedulePlayablePrefetch(contentStore.generatedList, 4)
   } catch (e) {
     console.error('加载失败:', e)
   } finally {
@@ -815,8 +823,9 @@ async function loadMore() {
   if (!hasMore.value || loading.value || contentStore.isLoadingMore) return
 
   try {
-    await contentStore.fetchMoreContent()
+    const moreItems = await contentStore.fetchMoreContent()
     hasMore.value = contentStore.hasMoreContent
+    schedulePlayablePrefetch(moreItems as PictureBook[], 3)
   } catch (e) {
     console.error('加载更多失败:', e)
   }
@@ -826,11 +835,61 @@ function goToCreate() {
   uni.switchTab({ url: '/pages/create/index' })
 }
 
+function schedulePlayablePrefetch(items: PictureBook[], limit = 4) {
+  items
+    .filter(item => inferContentType(item) === 'picture_book')
+    .slice(0, limit)
+    .forEach(item => {
+      if (!item.id || prefetchedPlayableIds.has(item.id) || queuedPlayablePrefetchIds.has(item.id)) {
+        return
+      }
+
+      const payload = (item.id ? contentStore.getCachedContent(item.id) : null) || item
+      if (isPlayablePayload(payload, inferContentType(payload))) {
+        prefetchedPlayableIds.add(item.id)
+        primePlayPayload(payload)
+        return
+      }
+
+      queuedPlayablePrefetchIds.add(item.id)
+      playablePrefetchQueue.push(item)
+    })
+
+  pumpPlayablePrefetchQueue()
+}
+
+function pumpPlayablePrefetchQueue() {
+  while (activePlayablePrefetchCount < MAX_PLAYABLE_PREFETCH_CONCURRENCY && playablePrefetchQueue.length > 0) {
+    const item = playablePrefetchQueue.shift()
+    if (!item?.id) {
+      continue
+    }
+
+    activePlayablePrefetchCount++
+    void contentStore.fetchContentDetail(item.id).then((detail) => {
+      prefetchedPlayableIds.add(item.id)
+      primePlayPayload(detail)
+    }).catch(() => {
+      /* silent */
+    }).finally(() => {
+      queuedPlayablePrefetchIds.delete(item.id)
+      activePlayablePrefetchCount = Math.max(0, activePlayablePrefetchCount - 1)
+      pumpPlayablePrefetchQueue()
+    })
+  }
+}
+
 function savePictureBookPlaylist() {
   const bookIds = contentStore.generatedList
     .filter(item => inferContentType(item) === 'picture_book')
     .map(item => item.id)
-  uni.setStorageSync('picture_book_playlist', bookIds)
+  uni.setStorageSync(STORAGE_KEYS.PICTURE_BOOK_PLAYLIST, bookIds)
+  uni.setStorageSync(STORAGE_KEYS.PICTURE_BOOK_PLAYLIST_META, {
+    source: 'library',
+    autoExtend: true,
+    hasMore: contentStore.hasMoreContent,
+    savedAt: Date.now()
+  })
 }
 
 function primePlayPayload(item: PictureBook) {
@@ -854,18 +913,37 @@ function primePlayPayload(item: PictureBook) {
   }
 }
 
+function isPlayablePayload(payload: any, contentType: string) {
+  return Boolean(
+    (contentType === 'picture_book' && payload?.pages?.length) ||
+    (contentType === 'nursery_rhyme' && payload?.audio_url) ||
+    (contentType === 'video' && payload?.video_url)
+  )
+}
+
+async function ensurePlayableNavigationPayload(item: PictureBook) {
+  const initialPayload = (item.id ? contentStore.getCachedContent(item.id) : null) || item
+  const contentType = inferContentType(initialPayload)
+  if (isPlayablePayload(initialPayload, contentType) || !item.id) {
+    primePlayPayload(initialPayload)
+    return initialPayload as any
+  }
+
+  uni.showLoading({ title: '打开中...', mask: true })
+  try {
+    const detail = await contentStore.fetchContentDetail(item.id)
+    primePlayPayload(detail)
+    return detail as any
+  } finally {
+    uni.hideLoading()
+  }
+}
+
 function warmPlayableDetail(item: PictureBook) {
   const payload = (item.id ? contentStore.getCachedContent(item.id) : null) || item
   const contentType = inferContentType(payload)
-  const playable = payload as any
-
-  const alreadyPlayable = (
-    (contentType === 'picture_book' && playable.pages?.length) ||
-    (contentType === 'nursery_rhyme' && playable.audio_url) ||
-    (contentType === 'video' && playable.video_url)
-  )
-
-  if (alreadyPlayable || !item.id) {
+  if (isPlayablePayload(payload, contentType) || !item.id) {
+    primePlayPayload(payload)
     return
   }
 
@@ -876,34 +954,45 @@ function warmPlayableDetail(item: PictureBook) {
   })
 }
 
-function goToDetail(item: PictureBook) {
-  const contentType = inferContentType(item)
-  videoPreviewId.value = null
-  warmPlayableDetail(item)
-  primePlayPayload(item)
-  if (contentType === 'nursery_rhyme') {
-    uni.navigateTo({ url: `/pages/play/nursery-rhyme?id=${item.id}` })
-  } else if (contentType === 'video') {
-    uni.navigateTo({ url: `/pages/play/video?id=${item.id}` })
-  } else {
-    savePictureBookPlaylist()
-    uni.navigateTo({ url: `/pages/play/picture-book?id=${item.id}` })
+async function navigateToPlayback(item: PictureBook, autoplay = false) {
+  if (playNavigationTask) {
+    return playNavigationTask
   }
+
+  videoPreviewId.value = null
+
+  const task = (async () => {
+    const payload = await ensurePlayableNavigationPayload(item)
+    const contentType = inferContentType(payload)
+
+    if (contentType === 'nursery_rhyme') {
+      uni.navigateTo({ url: `/pages/play/nursery-rhyme?id=${item.id}${autoplay ? '&autoplay=1' : ''}` })
+      return
+    }
+
+    if (contentType === 'video') {
+      uni.navigateTo({ url: `/pages/play/video?id=${item.id}` })
+      return
+    }
+
+    savePictureBookPlaylist()
+    uni.navigateTo({ url: `/pages/play/picture-book?id=${item.id}${autoplay ? '&autoplay=1' : ''}` })
+  })().finally(() => {
+    if (playNavigationTask === task) {
+      playNavigationTask = null
+    }
+  })
+
+  playNavigationTask = task
+  return task
+}
+
+function goToDetail(item: PictureBook) {
+  void navigateToPlayback(item, false)
 }
 
 function goToPlay(item: PictureBook) {
-  const contentType = inferContentType(item)
-  videoPreviewId.value = null
-  warmPlayableDetail(item)
-  primePlayPayload(item)
-  if (contentType === 'nursery_rhyme') {
-    uni.navigateTo({ url: `/pages/play/nursery-rhyme?id=${item.id}&autoplay=1` })
-  } else if (contentType === 'video') {
-    uni.navigateTo({ url: `/pages/play/video?id=${item.id}` })
-  } else {
-    savePictureBookPlaylist()
-    uni.navigateTo({ url: `/pages/play/picture-book?id=${item.id}&autoplay=1` })
-  }
+  void navigateToPlayback(item, true)
 }
 
 function showActionSheet(item: PictureBook) {

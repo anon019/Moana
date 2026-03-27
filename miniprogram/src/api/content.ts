@@ -620,7 +620,11 @@ export async function getGeneratedList(params?: {
   total: number
   has_more: boolean
 }> {
-  return request.get('/content/list', { data: params })
+  return request.get('/content/list', {
+    data: params,
+    useCache: true,
+    cacheTTL: 3 * 60 * 1000
+  })
 }
 
 /**

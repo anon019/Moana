@@ -134,5 +134,8 @@ export async function getPlayHistory(childId: string, params?: {
   const queryString = queryParts.join('&')
   const url = `/play/history/${childId}${queryString ? '?' + queryString : ''}`
 
-  return request.get(url)
+  return request.get(url, {
+    useCache: true,
+    cacheTTL: 60 * 1000
+  })
 }

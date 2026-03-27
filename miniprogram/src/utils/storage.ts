@@ -8,9 +8,13 @@ export const STORAGE_KEYS = {
   ACCESS_TOKEN: 'access_token',
   REFRESH_TOKEN: 'refresh_token',
   CURRENT_CHILD_ID: 'current_child_id',
+  CHILDREN_CACHE: 'children_cache',
   THEME_CACHE: 'theme_cache',
   LAST_PLAY_CONTENT: 'last_play_content',
-  CHILD_MODE_PIN: 'child_mode_pin'
+  CHILD_MODE_PIN: 'child_mode_pin',
+  HOME_RECENT_PLAYS_PREFIX: 'home_recent_plays_',
+  PICTURE_BOOK_PLAYLIST: 'picture_book_playlist',
+  PICTURE_BOOK_PLAYLIST_META: 'picture_book_playlist_meta'
 } as const
 
 /**
