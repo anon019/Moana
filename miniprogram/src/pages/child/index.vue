@@ -172,7 +172,6 @@ import { onLoad } from '@dcloudio/uni-app'
 import { useChildStore } from '@/stores/child'
 import { useContentStore } from '@/stores/content'
 import type { PictureBook } from '@/api/content'
-import { STORAGE_KEYS } from '@/utils/storage'
 
 const childStore = useChildStore()
 const contentStore = useContentStore()
@@ -266,15 +265,9 @@ function startPlay() {
       const bookIds = allContentList.value
         .filter(item => (item as any).content_type === 'picture_book')
         .map(item => item.id)
-      uni.setStorageSync(STORAGE_KEYS.PICTURE_BOOK_PLAYLIST, bookIds)
-      uni.setStorageSync(STORAGE_KEYS.PICTURE_BOOK_PLAYLIST_META, {
-        source: 'child',
-        autoExtend: false,
-        savedAt: Date.now()
-      })
+      uni.setStorageSync('picture_book_playlist', bookIds)
     } else {
-      uni.removeStorageSync(STORAGE_KEYS.PICTURE_BOOK_PLAYLIST)
-      uni.removeStorageSync(STORAGE_KEYS.PICTURE_BOOK_PLAYLIST_META)
+      uni.removeStorageSync('picture_book_playlist')
     }
   }
 

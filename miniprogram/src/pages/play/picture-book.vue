@@ -1,5 +1,5 @@
 <template>
-  <view class="storybook" @tap="handleTap">
+  <view class="storybook" :class="{ 'landscape-mode': isLandscape }" @tap="handleTap">
     <!-- 魔法背景 -->
     <view class="magic-bg">
       <view class="sparkle" v-for="i in 4" :key="i" :style="getSparkleStyle(i)"></view>
@@ -48,6 +48,7 @@
 
           <!-- 故事文字卡片 - 童话书页风格 -->
           <view
+            v-if="showStoryText"
             class="story-card"
             :class="{ visible: currentPage === index && cardVisible }"
           >
@@ -65,7 +66,6 @@
               <view class="text-wrapper">
                 <text class="story-text">{{ page.text }}</text>
               </view>
-              <!-- 页码装饰 -->
               <view class="page-number">
                 <text>{{ index + 1 }} / {{ content?.pages?.length || 0 }}</text>
               </view>
@@ -74,6 +74,18 @@
         </view>
       </swiper-item>
     </swiper>
+
+    <view v-if="!isLandscape" class="page-dots">
+      <view
+        v-for="(_, index) in content?.pages || []"
+        :key="index"
+        class="dot"
+        :class="{
+          active: index === currentPage,
+          passed: index < currentPage
+        }"
+      ></view>
+    </view>
 
     <!-- 极简顶部 - 只有返回 -->
     <view class="minimal-header" :style="{ paddingTop: statusBarHeight + 'px' }">
@@ -89,21 +101,8 @@
       </view>
     </view>
 
-    <!-- 底部页码指示器 -->
-    <view class="page-dots">
-      <view
-        v-for="(_, index) in content?.pages || []"
-        :key="index"
-        class="dot"
-        :class="{
-          active: index === currentPage,
-          passed: index < currentPage
-        }"
-      ></view>
-    </view>
-
     <!-- 翻页提示 (首次显示) -->
-    <view v-if="showSwipeHint" class="swipe-hint">
+    <view v-if="showSwipeHint && !isLandscape" class="swipe-hint">
       <view class="hint-hand">👆</view>
       <text class="hint-label">滑动翻页</text>
     </view>
@@ -172,7 +171,6 @@ import { useContentStore } from '@/stores/content'
 import { startPlay, updateProgress, completePlay, submitInteraction } from '@/api/play'
 import { generatePoster, savePosterToAlbum } from '@/utils/poster'
 import { ensureHttps } from '@/utils/url'
-import { STORAGE_KEYS } from '@/utils/storage'
 import perf from '@/utils/performance'
 import type { PictureBook, PictureBookPage } from '@/api/content'
 
@@ -196,20 +194,15 @@ const imageLoaded = ref<boolean[]>([])
 const imageRetryCount = ref<number[]>([])  // each page's retry count
 const MAX_IMAGE_RETRY = 3
 const cardVisible = ref(false)
+const isLandscape = ref(false)
 const showPauseOverlay = ref(false)
 const showSwipeHint = ref(false)
 const showComplete = ref(false)
 const statusBarHeight = ref(44)
+const showStoryText = computed(() => !isLandscape.value)
 
 // 顺序播放队列
 const playlist = ref<string[]>([])
-type PlaylistMeta = {
-  source?: string
-  autoExtend?: boolean
-  hasMore?: boolean
-  savedAt?: number
-}
-const playlistMeta = ref<PlaylistMeta | null>(null)
 let playIndex = 0
 const showTransition = ref(false)
 const nextBookTitle = ref('')
@@ -220,6 +213,7 @@ const nextBookTitle = ref('')
 let isUnmounted = false
 // 防止 onImageLoad 和 onAnimationFinish 重复触发同一页音频
 let audioStartedForPage = -1
+let audioStartingForPage = -1
 
 // 海报分享
 const generatingPoster = ref(false)
@@ -232,6 +226,7 @@ let pageAdvanceTimer: number | null = null
 let completeTimer: number | null = null  // 完成后自动返回的定时器
 let resumePlayTimer: number | null = null
 let audioBootstrapTimer: number | null = null
+let windowResizeHandler: ((res: any) => void) | null = null
 const audioReady = ref(false)
 let currentAudioPage = -1
 let currentAudioCacheKey = ''
@@ -239,35 +234,24 @@ let currentAudioNetworkSrc = ''
 let currentAudioUsesCachedFile = false
 let currentAudioRequestId = 0
 let currentAudioStartedOnce = false
-let currentAudioStartDeadlineAt = 0
-let currentAudioStartupRetryCount = 0
 let currentAudioTime = 0
 let currentAudioDuration = 0
+let currentAudioBootstrapRetries = 0
 let activeBookToken = 0
 let warmingNextBookId = ''
 let warmedNextBook: PictureBook | null = null
 let warmedNextBookReadyTask: Promise<void> | null = null
 let nextBookWarmTask: Promise<PictureBook | null> | null = null
-let playlistExtendTask: Promise<boolean> | null = null
 let playSessionRequestToken = 0
 let imageWarmGeneration = 0
 let retainedAudioBookIds: Set<string> | null = null
 const INITIAL_VIEWPORT_IMAGE_TIMEOUT = 700
 const AUDIO_BOOTSTRAP_TIMEOUT = 7000
+const MAX_AUDIO_BOOTSTRAP_RETRY = 1
 const MIN_AUDIO_FALLBACK_MS = 3500
 const MAX_AUDIO_FALLBACK_MS = 15000
-const MAX_AUDIO_START_WAIT_MS = 20000
-const MAX_AUDIO_STARTUP_RETRY = 1
 // 音频缓存：bookId:pageIndex:url -> 本地文件路径
 const audioCache = new Map<string, string>()
-type PersistedAudioCacheEntry = {
-  filePath: string
-  lastAccessedAt: number
-}
-const AUDIO_CACHE_INDEX_STORAGE_KEY = 'picture_book_audio_cache_index'
-const MAX_PERSISTED_AUDIO_CACHE_ENTRIES = 48
-const persistedAudioCacheIndex = new Map<string, PersistedAudioCacheEntry>()
-let persistedAudioCacheIndexLoaded = false
 // 图片预热去重，避免频繁重复 getImageInfo
 const imagePreloading = new Set<number>()
 const warmedImageUrls = new Set<string>()
@@ -301,6 +285,36 @@ const queuedAudioDownloads = new Map<string, {
 const audioDownloading = new Set<string>()
 const MAX_AUDIO_PRELOAD_CONCURRENCY = 1
 let activeAudioDownloadCount = 0
+
+function getViewportSize(payload?: any) {
+  const width = Number(
+    payload?.size?.windowWidth
+    || payload?.windowWidth
+    || payload?.width
+    || 0
+  )
+  const height = Number(
+    payload?.size?.windowHeight
+    || payload?.windowHeight
+    || payload?.height
+    || 0
+  )
+
+  if (width > 0 && height > 0) {
+    return { width, height }
+  }
+
+  const sysInfo = uni.getSystemInfoSync()
+  return {
+    width: Number(sysInfo.windowWidth || sysInfo.screenWidth || 0),
+    height: Number(sysInfo.windowHeight || sysInfo.screenHeight || 0)
+  }
+}
+
+function updateLayoutMode(payload?: any) {
+  const { width, height } = getViewportSize(payload)
+  isLandscape.value = width > height
+}
 
 function notifyAudioCached(cacheKey: string) {
   const callbacks = audioCacheCallbacks.get(cacheKey)
@@ -402,12 +416,16 @@ function canAutoStartCurrentPage(pageIndex = currentPage.value) {
 }
 
 function requestCurrentPagePlayback(pageIndex = currentPage.value) {
-  if (!canAutoStartCurrentPage(pageIndex) || audioStartedForPage === pageIndex) {
+  if (!canAutoStartCurrentPage(pageIndex) || audioStartedForPage === pageIndex || audioStartingForPage === pageIndex) {
     return
   }
 
-  audioStartedForPage = pageIndex
-  void playCurrentPageAudio()
+  audioStartingForPage = pageIndex
+  void playCurrentPageAudio().finally(() => {
+    if (audioStartingForPage === pageIndex && audioStartedForPage !== pageIndex) {
+      audioStartingForPage = -1
+    }
+  })
 }
 
 function getFallbackDelay(page?: PictureBookPage) {
@@ -420,57 +438,6 @@ function getFallbackDelay(page?: PictureBookPage) {
   const baseMs = remainingAudioMs > 0 ? remainingAudioMs + 400 : (apiDurationMs || 5000)
 
   return Math.max(MIN_AUDIO_FALLBACK_MS, Math.min(MAX_AUDIO_FALLBACK_MS, baseMs))
-}
-
-function getAudioStartupRecheckDelay() {
-  if (!currentAudioStartDeadlineAt) {
-    return MIN_AUDIO_FALLBACK_MS
-  }
-
-  const remainingMs = Math.max(0, currentAudioStartDeadlineAt - Date.now())
-  return Math.max(1500, Math.min(4000, remainingMs))
-}
-
-function markCurrentAudioStarted() {
-  audioReady.value = true
-
-  if (!currentAudioStartedOnce) {
-    currentAudioStartedOnce = true
-    stopAutoPlay()
-  }
-
-  currentAudioDuration = Math.max(currentAudioDuration, Number(audioContext?.duration || 0))
-  cancelAudioBootstrapTimer()
-}
-
-function retryCurrentAudioPlayback(pageIndex: number, requestId: number, forceNetwork = false) {
-  if (!audioContext || !isPlaying.value) return false
-  if (pageIndex !== currentPage.value || requestId !== currentAudioRequestId) return false
-
-  let nextSrc = ''
-
-  if (!forceNetwork && currentAudioUsesCachedFile) {
-    nextSrc = audioCache.get(currentAudioCacheKey) || ''
-  }
-
-  if (!nextSrc) {
-    nextSrc = currentAudioNetworkSrc
-    currentAudioUsesCachedFile = false
-  }
-
-  if (!nextSrc) return false
-
-  audioReady.value = false
-  try { audioContext.stop() } catch (e) { /* ignore */ }
-
-  try {
-    audioContext.src = nextSrc
-    audioContext.play()
-    return true
-  } catch (e) {
-    console.warn('[绘本音频] 重试播放失败', e)
-    return false
-  }
 }
 
 function schedulePageAdvance(delay = 600, expectedPage = currentPage.value, requestId = currentAudioRequestId) {
@@ -491,19 +458,19 @@ function startAudioBootstrapWatchdog(pageIndex: number, requestId: number) {
     if (!isPlaying.value || loading.value || showTransition.value) return
     if (pageIndex !== currentPage.value) return
     if (requestId !== currentAudioRequestId) return
-    if (currentAudioStartedOnce) return
+    if (currentAudioStartedOnce || audioReady.value) return
 
-    if (currentAudioStartupRetryCount < MAX_AUDIO_STARTUP_RETRY) {
-      currentAudioStartupRetryCount++
-      console.warn(`[绘本音频] 第 ${pageIndex + 1} 页启动超时，尝试重播`)
-      if (retryCurrentAudioPlayback(pageIndex, requestId, true)) {
-        startAudioBootstrapWatchdog(pageIndex, requestId)
-        return
-      }
+    if (currentAudioBootstrapRetries < MAX_AUDIO_BOOTSTRAP_RETRY && content.value?.pages?.[pageIndex]?.audio_url) {
+      currentAudioBootstrapRetries++
+      audioStartedForPage = -1
+      audioStartingForPage = -1
+      console.warn(`[绘本音频] 第 ${pageIndex + 1} 页首播超时，执行第 ${currentAudioBootstrapRetries} 次重试`)
+      requestCurrentPagePlayback(pageIndex)
+      return
     }
 
-    console.warn(`[绘本音频] 第 ${pageIndex + 1} 页长时间未开始播放，进入保守等待`)
-    startFallbackTimer(getAudioStartupRecheckDelay(), pageIndex, requestId)
+    console.warn(`[绘本音频] 第 ${pageIndex + 1} 页长时间未就绪，使用保守降级计时`)
+    startFallbackTimer(undefined, pageIndex, requestId)
   }, AUDIO_BOOTSTRAP_TIMEOUT)
 }
 
@@ -519,181 +486,6 @@ function getBookIdFromAudioCacheKey(cacheKey: string): string {
   } catch (e) {
     return ''
   }
-}
-
-function loadPersistedAudioCacheIndex() {
-  if (persistedAudioCacheIndexLoaded) {
-    return
-  }
-
-  persistedAudioCacheIndexLoaded = true
-
-  try {
-    const rawEntries = uni.getStorageSync(AUDIO_CACHE_INDEX_STORAGE_KEY) as Array<[string, PersistedAudioCacheEntry]> | null
-    if (!Array.isArray(rawEntries)) {
-      return
-    }
-
-    rawEntries.forEach(([key, entry]) => {
-      if (!key || !entry?.filePath) {
-        return
-      }
-
-      persistedAudioCacheIndex.set(key, {
-        filePath: entry.filePath,
-        lastAccessedAt: Number(entry.lastAccessedAt || 0)
-      })
-    })
-  } catch (e) {
-    console.warn('[绘本音频] 读取持久缓存索引失败', e)
-  }
-}
-
-function persistAudioCacheIndex() {
-  try {
-    uni.setStorageSync(AUDIO_CACHE_INDEX_STORAGE_KEY, Array.from(persistedAudioCacheIndex.entries()))
-  } catch (e) {
-    console.warn('[绘本音频] 写入持久缓存索引失败', e)
-  }
-}
-
-function isPersistedAudioPath(cacheKey: string, filePath?: string) {
-  if (!filePath) return false
-
-  loadPersistedAudioCacheIndex()
-  return persistedAudioCacheIndex.get(cacheKey)?.filePath === filePath
-}
-
-function touchPersistedAudioCacheEntry(cacheKey: string, filePath?: string) {
-  if (!filePath) return
-
-  loadPersistedAudioCacheIndex()
-  const entry = persistedAudioCacheIndex.get(cacheKey)
-  if (!entry || entry.filePath !== filePath) {
-    return
-  }
-
-  entry.lastAccessedAt = Date.now()
-  persistedAudioCacheIndex.set(cacheKey, entry)
-  persistAudioCacheIndex()
-}
-
-function unlinkAudioFile(filePath?: string) {
-  if (!filePath) return
-
-  try {
-    uni.getFileSystemManager().unlink({
-      filePath,
-      fail: () => { /* silent */ }
-    })
-  } catch (e) { /* silent */ }
-}
-
-function removePersistedAudioCacheEntry(cacheKey: string, expectedPath?: string) {
-  loadPersistedAudioCacheIndex()
-
-  const entry = persistedAudioCacheIndex.get(cacheKey)
-  if (!entry) {
-    return
-  }
-
-  if (expectedPath && entry.filePath !== expectedPath) {
-    return
-  }
-
-  persistedAudioCacheIndex.delete(cacheKey)
-  persistAudioCacheIndex()
-  unlinkAudioFile(entry.filePath)
-}
-
-async function trimPersistedAudioCache() {
-  loadPersistedAudioCacheIndex()
-
-  if (persistedAudioCacheIndex.size <= MAX_PERSISTED_AUDIO_CACHE_ENTRIES) {
-    return
-  }
-
-  const overflowEntries = Array.from(persistedAudioCacheIndex.entries())
-    .sort((a, b) => a[1].lastAccessedAt - b[1].lastAccessedAt)
-    .slice(0, persistedAudioCacheIndex.size - MAX_PERSISTED_AUDIO_CACHE_ENTRIES)
-
-  overflowEntries.forEach(([cacheKey, entry]) => {
-    persistedAudioCacheIndex.delete(cacheKey)
-    if (audioCache.get(cacheKey) === entry.filePath) {
-      audioCache.delete(cacheKey)
-    }
-    unlinkAudioFile(entry.filePath)
-  })
-
-  persistAudioCacheIndex()
-}
-
-async function getPersistedAudioCachePath(cacheKey: string): Promise<string | null> {
-  loadPersistedAudioCacheIndex()
-
-  const entry = persistedAudioCacheIndex.get(cacheKey)
-  if (!entry?.filePath) {
-    return null
-  }
-
-  return await new Promise((resolve) => {
-    uni.getFileInfo({
-      filePath: entry.filePath,
-      success: () => {
-        touchPersistedAudioCacheEntry(cacheKey, entry.filePath)
-        resolve(entry.filePath)
-      },
-      fail: () => {
-        persistedAudioCacheIndex.delete(cacheKey)
-        persistAudioCacheIndex()
-        resolve(null)
-      }
-    })
-  })
-}
-
-function persistAudioCacheFile(cacheKey: string, tempFilePath?: string) {
-  if (!tempFilePath || isPersistedAudioPath(cacheKey, tempFilePath)) {
-    return
-  }
-
-  loadPersistedAudioCacheIndex()
-
-  const currentEntry = persistedAudioCacheIndex.get(cacheKey)
-  if (currentEntry?.filePath === tempFilePath) {
-    touchPersistedAudioCacheEntry(cacheKey, tempFilePath)
-    return
-  }
-
-  uni.saveFile({
-    tempFilePath,
-    success: (res) => {
-      const savedFilePath = res.savedFilePath
-      if (!savedFilePath) {
-        return
-      }
-
-      const previousPath = persistedAudioCacheIndex.get(cacheKey)?.filePath
-      persistedAudioCacheIndex.set(cacheKey, {
-        filePath: savedFilePath,
-        lastAccessedAt: Date.now()
-      })
-      persistAudioCacheIndex()
-
-      if (audioCache.get(cacheKey) === tempFilePath || !audioCache.get(cacheKey)) {
-        audioCache.set(cacheKey, savedFilePath)
-      }
-
-      if (previousPath && previousPath !== savedFilePath) {
-        unlinkAudioFile(previousPath)
-      }
-
-      void trimPersistedAudioCache()
-    },
-    fail: () => {
-      /* silent */
-    }
-  })
 }
 
 function queueImageWarm(src?: string, priority = 1): Promise<void> {
@@ -819,7 +611,6 @@ function pumpAudioDownloadQueue() {
           }
 
           audioCache.set(task.key, res.tempFilePath)
-          persistAudioCacheFile(task.key, res.tempFilePath)
           notifyAudioCached(task.key)
           return
         }
@@ -863,86 +654,6 @@ function getUpcomingBookId(offset = 1): string {
   }
 
   return playlist.value[nextIndex]
-}
-
-function isPictureBookContent(item: any) {
-  if (!item) return false
-  if (item.content_type) return item.content_type === 'picture_book'
-  if (item.video_url) return false
-  if (item.audio_url && !item.pages) return false
-  return true
-}
-
-function isLibraryPlaylistSource() {
-  return playlistMeta.value?.source === 'library'
-}
-
-function persistPlaylistState() {
-  uni.setStorageSync(STORAGE_KEYS.PICTURE_BOOK_PLAYLIST, playlist.value)
-  if (playlistMeta.value) {
-    uni.setStorageSync(STORAGE_KEYS.PICTURE_BOOK_PLAYLIST_META, {
-      ...playlistMeta.value,
-      hasMore: contentStore.hasMoreContent,
-      savedAt: Date.now()
-    })
-  }
-}
-
-function appendBooksToPlaylist(items: any[]) {
-  const existing = new Set(playlist.value)
-  const additionalIds = items
-    .filter(item => isPictureBookContent(item) && item.id)
-    .map(item => item.id)
-    .filter(id => !existing.has(id))
-
-  if (!additionalIds.length) {
-    return false
-  }
-
-  playlist.value = [...playlist.value, ...additionalIds]
-  persistPlaylistState()
-  console.log(`[绘本] 内容库队列追加 ${additionalIds.length} 本，当前共 ${playlist.value.length} 本`)
-  return true
-}
-
-async function extendLibraryPlaylistIfNeeded(minUpcomingOffset = 1): Promise<boolean> {
-  if (!isLibraryPlaylistSource()) {
-    return false
-  }
-
-  if (getUpcomingBookId(minUpcomingOffset)) {
-    return true
-  }
-
-  if (playlistExtendTask) {
-    return playlistExtendTask
-  }
-
-  playlistExtendTask = (async () => {
-    if (appendBooksToPlaylist(contentStore.generatedList as any[])) {
-      return true
-    }
-
-    while (contentStore.hasMoreContent && !isUnmounted) {
-      const moreItems = await contentStore.fetchMoreContent()
-      if (appendBooksToPlaylist(moreItems as any[])) {
-        return true
-      }
-      if (!moreItems.length) {
-        break
-      }
-    }
-
-    persistPlaylistState()
-    return !!getUpcomingBookId(minUpcomingOffset)
-  })().catch((e) => {
-    console.warn('[绘本] 内容库队列续批失败', e)
-    return false
-  }).finally(() => {
-    playlistExtendTask = null
-  })
-
-  return playlistExtendTask
 }
 
 function warmBookEntryAssets(book: PictureBook, startPage = 0): Promise<void> {
@@ -989,48 +700,39 @@ function warmBookEntryAssets(book: PictureBook, startPage = 0): Promise<void> {
 }
 
 function warmUpcomingBook(force = false): Promise<PictureBook | null> {
-  return (async () => {
-    let nextId = getUpcomingBookId()
-    if (!nextId) {
-      const extended = await extendLibraryPlaylistIfNeeded()
-      if (extended) {
-        nextId = getUpcomingBookId()
-      }
-    }
+  const nextId = getUpcomingBookId()
+  if (!nextId) {
+    return Promise.resolve(null)
+  }
 
-    if (!nextId) {
+  if (!force && warmedNextBook?.id === nextId) {
+    return Promise.resolve(warmedNextBook)
+  }
+
+  if (!force && warmingNextBookId === nextId && nextBookWarmTask) {
+    return nextBookWarmTask
+  }
+
+  warmingNextBookId = nextId
+  nextBookWarmTask = (async () => {
+    const cached = contentStore.getCachedContent(nextId)
+    const nextBook = cached?.pages?.length ? cached : await contentStore.fetchContentDetail(nextId)
+    if (!nextBook?.pages?.length) {
       return null
     }
 
-    if (!force && warmedNextBook?.id === nextId) {
-      return warmedNextBook
+    warmedNextBook = nextBook
+    warmedNextBookReadyTask = warmBookEntryAssets(nextBook)
+    return nextBook
+  })().catch(() => {
+    return null
+  }).finally(() => {
+    if (warmingNextBookId === nextId) {
+      warmingNextBookId = ''
     }
+  })
 
-    if (!force && warmingNextBookId === nextId && nextBookWarmTask) {
-      return await nextBookWarmTask
-    }
-
-    warmingNextBookId = nextId
-    nextBookWarmTask = (async () => {
-      const cached = contentStore.getCachedContent(nextId)
-      const nextBook = cached?.pages?.length ? cached : await contentStore.fetchContentDetail(nextId)
-      if (!nextBook?.pages?.length) {
-        return null
-      }
-
-      warmedNextBook = nextBook
-      warmedNextBookReadyTask = warmBookEntryAssets(nextBook)
-      return nextBook
-    })().catch(() => {
-      return null
-    }).finally(() => {
-      if (warmingNextBookId === nextId) {
-        warmingNextBookId = ''
-      }
-    })
-
-    return await nextBookWarmTask
-  })()
+  return nextBookWarmTask
 }
 
 // 本地是否已有存储的播放进度（区分"从头开始"和"无记录"）
@@ -1116,6 +818,8 @@ function onPageChange(e: any) {
   cardVisible.value = false
   showInteraction.value = false
   audioStartedForPage = -1  // 重置防重复标记
+  audioStartingForPage = -1
+  currentAudioBootstrapRetries = 0
   cancelTimeout(resumePlayTimer)
   resumePlayTimer = null
 
@@ -1133,16 +837,10 @@ function onPageChange(e: any) {
 function onAnimationFinish() {
   nextTick(() => {
     cardVisible.value = true
-    const pageIndex = currentPage.value
-    if (imageLoaded.value[pageIndex]) {
-      requestCurrentPagePlayback(pageIndex)
-      return
-    }
-
-    void waitForImageLoad(pageIndex, 450).finally(() => {
-      if (pageIndex !== currentPage.value) return
-      requestCurrentPagePlayback(pageIndex)
-    })
+    // 如果 onImageLoad 还没触发音频，这里作为后备触发
+    scheduleTimeout(() => {
+      requestCurrentPagePlayback()
+    }, 100)
   })
 }
 
@@ -1190,10 +888,8 @@ function onImageLoad(index: number) {
   }
 
   // 当前页图片加载完成后立即显示卡片并播放音频（无延迟）
-  if (index === currentPage.value) {
-    if (!cardVisible.value) {
-      cardVisible.value = true
-    }
+  if (index === currentPage.value && !cardVisible.value) {
+    cardVisible.value = true
     requestCurrentPagePlayback(index)
   }
 }
@@ -1290,6 +986,14 @@ function preloadAudioBatch(startIndex: number, count = 3, priority = 1, book: Pi
   }
 }
 
+function primeCurrentPageAudio(pageIndex = currentPage.value) {
+  if (!content.value?.pages?.length) return
+
+  const safePage = clampPageIndex(pageIndex)
+  ensureAudioContext()
+  preloadAudioBatch(safePage, 2, 0)
+}
+
 // 等待图片加载完成（事件驱动，替代轮询）
 function waitForImageLoad(pageIndex: number, timeout = 5000): Promise<boolean> {
   return new Promise((resolve) => {
@@ -1331,25 +1035,13 @@ function waitForImageLoad(pageIndex: number, timeout = 5000): Promise<boolean> {
 }
 
 // 等待音频缓存完成（事件驱动，替代轮询）
-async function waitForAudioCache(pageIndex: number, audioUrl?: string, timeout = 2000, bookId = content.value?.id || contentId.value || 'temp-book'): Promise<string | null> {
+function waitForAudioCache(pageIndex: number, audioUrl?: string, timeout = 2000, bookId = content.value?.id || contentId.value || 'temp-book'): Promise<string | null> {
   const cacheKey = getAudioCacheKey(pageIndex, audioUrl, bookId)
-  const memoryCachedPath = audioCache.get(cacheKey)
-  if (memoryCachedPath) {
-    touchPersistedAudioCacheEntry(cacheKey, memoryCachedPath)
-    return memoryCachedPath
-  }
-
-  const persistedPath = await getPersistedAudioCachePath(cacheKey)
-  if (persistedPath) {
-    audioCache.set(cacheKey, persistedPath)
-    return persistedPath
-  }
 
   return new Promise((resolve) => {
+    // 已缓存
     if (audioCache.has(cacheKey)) {
-      const cachedPath = audioCache.get(cacheKey)!
-      touchPersistedAudioCacheEntry(cacheKey, cachedPath)
-      resolve(cachedPath)
+      resolve(audioCache.get(cacheKey)!)
       return
     }
 
@@ -1400,20 +1092,28 @@ function ensureAudioContext() {
   audioContext.onCanplay(() => {
     if (currentAudioPage === currentPage.value) {
       audioReady.value = true
+      audioStartedForPage = currentAudioPage
+      audioStartingForPage = -1
       currentAudioDuration = Math.max(currentAudioDuration, Number(audioContext?.duration || 0))
+      cancelAudioBootstrapTimer()
     }
   })
 
   audioContext.onPlay(() => {
     if (currentAudioPage === currentPage.value) {
-      markCurrentAudioStarted()
+      audioReady.value = true
+      currentAudioStartedOnce = true
+      audioStartedForPage = currentAudioPage
+      audioStartingForPage = -1
+      currentAudioDuration = Math.max(currentAudioDuration, Number(audioContext?.duration || 0))
+      cancelAudioBootstrapTimer()
     }
   })
 
   audioContext.onTimeUpdate(() => {
     if (currentAudioPage !== currentPage.value) return
 
-    markCurrentAudioStarted()
+    currentAudioStartedOnce = true
     currentAudioTime = Number(audioContext?.currentTime || 0)
     const duration = Number(audioContext?.duration || 0)
     if (duration > 0) {
@@ -1443,7 +1143,6 @@ function ensureAudioContext() {
     audioReady.value = false
 
     if (currentAudioUsesCachedFile && currentAudioNetworkSrc && audioContext && currentAudioPage === currentPage.value && isPlaying.value) {
-      removePersistedAudioCacheEntry(currentAudioCacheKey, audioCache.get(currentAudioCacheKey))
       audioCache.delete(currentAudioCacheKey)
       currentAudioUsesCachedFile = false
       try { audioContext.stop() } catch (e) { /* ignore */ }
@@ -1451,14 +1150,6 @@ function ensureAudioContext() {
       audioContext.play()
       startAudioBootstrapWatchdog(currentAudioPage, currentAudioRequestId)
       return
-    }
-
-    if (currentAudioPage === currentPage.value && !currentAudioStartedOnce && currentAudioStartupRetryCount < MAX_AUDIO_STARTUP_RETRY) {
-      currentAudioStartupRetryCount++
-      if (retryCurrentAudioPlayback(currentAudioPage, currentAudioRequestId, true)) {
-        startAudioBootstrapWatchdog(currentAudioPage, currentAudioRequestId)
-        return
-      }
     }
 
     startFallbackTimer(undefined, currentAudioPage, currentAudioRequestId)
@@ -1478,9 +1169,8 @@ async function playCurrentPageAudio() {
   const page = content.value.pages[pageIndex]
   if (!page) return
   const requestId = ++currentAudioRequestId
+  audioStartingForPage = pageIndex
   currentAudioStartedOnce = false
-  currentAudioStartDeadlineAt = Date.now() + MAX_AUDIO_START_WAIT_MS
-  currentAudioStartupRetryCount = 0
   currentAudioTime = 0
   currentAudioDuration = Number(page.duration || 0)
 
@@ -1488,17 +1178,12 @@ async function playCurrentPageAudio() {
 
   // 后台预加载下一页资源（不阻塞当前播放）
   preloadAdjacentImages(pageIndex + 1, 2)
-  preloadAudio(pageIndex - 1, 0)
   preloadAudio(pageIndex, 0)
   preloadAudio(pageIndex + 1, 0)
-  preloadAudio(pageIndex - 2, 1)
   preloadAudio(pageIndex + 2, 1)
 
   // 快到最后了，预加载下一本绘本数据
   if (playlist.value.length > 1 && pageIndex >= totalPages.value - 3) {
-    if (playIndex >= playlist.value.length - 2) {
-      void extendLibraryPlaylistIfNeeded()
-    }
     void warmUpcomingBook()
   }
 
@@ -1535,8 +1220,8 @@ async function playCurrentPageAudio() {
     currentAudioCacheKey = ''
     currentAudioNetworkSrc = ''
     currentAudioUsesCachedFile = false
-    currentAudioStartDeadlineAt = 0
-    currentAudioStartupRetryCount = 0
+    audioStartedForPage = pageIndex
+    audioStartingForPage = -1
     // 无音频，使用定时器
     startFallbackTimer(undefined, pageIndex, requestId)
   }
@@ -1558,11 +1243,11 @@ function stopCurrentAudio() {
   }
   audioReady.value = false
   currentAudioStartedOnce = false
-  currentAudioStartDeadlineAt = 0
-  currentAudioStartupRetryCount = 0
   currentAudioTime = 0
   currentAudioDuration = 0
+  currentAudioBootstrapRetries = 0
   currentAudioPage = -1
+  audioStartingForPage = -1
   currentAudioUsesCachedFile = false
   currentAudioCacheKey = ''
   currentAudioNetworkSrc = ''
@@ -1579,11 +1264,11 @@ function destroyCurrentAudio() {
     audioContext = null
   }
   currentAudioStartedOnce = false
-  currentAudioStartDeadlineAt = 0
-  currentAudioStartupRetryCount = 0
   currentAudioTime = 0
   currentAudioDuration = 0
+  currentAudioBootstrapRetries = 0
   currentAudioPage = -1
+  audioStartingForPage = -1
   currentAudioCacheKey = ''
   currentAudioNetworkSrc = ''
   currentAudioUsesCachedFile = false
@@ -1632,9 +1317,12 @@ function cleanupAudioTempFiles(keepBookIds?: Set<string>) {
       return
     }
 
-    if (!isPersistedAudioPath(cacheKey, tempPath)) {
-      unlinkAudioFile(tempPath)
-    }
+    try {
+      uni.getFileSystemManager().unlink({
+        filePath: tempPath,
+        fail: () => { /* silent */ }
+      })
+    } catch (e) { /* silent */ }
     audioCache.delete(cacheKey)
   })
   if (!keepBookIds || keepBookIds.size === 0) {
@@ -1647,9 +1335,7 @@ async function prepareInitialViewport(targetPage = currentPage.value, excludeInd
   if (!content.value?.pages?.length) return
 
   const safePage = clampPageIndex(targetPage)
-  ensureAudioContext()
   preloadAdjacentImages(safePage, 3, excludeIndices)
-  preloadAudioBatch(safePage, 2, 0)
 
   const firstPage = content.value.pages[safePage]
   const firstImageReady = Promise.race([
@@ -1663,17 +1349,10 @@ async function prepareInitialViewport(targetPage = currentPage.value, excludeInd
 // 切换到下一本绘本
 async function switchToNextBook() {
   const prevIndex = playIndex
+  const nextIndex = playIndex + 1
   const playSnapshot = createPlayProgressSnapshot()
-  let nextIndex = playIndex + 1
 
   // 播完所有绘本后停止（不循环），立即显示完成界面
-  if (nextIndex >= playlist.value.length) {
-    const extended = await extendLibraryPlaylistIfNeeded()
-    if (extended) {
-      nextIndex = playIndex + 1
-    }
-  }
-
   if (nextIndex >= playlist.value.length) {
     console.log(`[绘本] 播放队列全部完成`)
     invalidatePlaySessionRequest()
@@ -1702,6 +1381,7 @@ async function switchToNextBook() {
   cardVisible.value = false
   stopAutoPlay()
   stopCurrentAudio()
+  destroyCurrentAudio()
   // 主动 resolve 挂起的图片等待回调，避免 5s 超时悬空
   imageLoadCallbacks.forEach(callbacks => callbacks.forEach(cb => cb()))
   imageLoadCallbacks.clear()
@@ -1800,13 +1480,6 @@ function startFallbackTimer(delayMs?: number, expectedPage = currentPage.value, 
     if (!isPlaying.value || loading.value || showTransition.value) return
     if (expectedPage !== currentPage.value) return
     if (requestId !== currentAudioRequestId) return
-    if (page?.audio_url && expectedPage === currentAudioPage && !currentAudioStartedOnce) {
-      const remainingStartupMs = currentAudioStartDeadlineAt - Date.now()
-      if (remainingStartupMs > 0) {
-        startFallbackTimer(getAudioStartupRecheckDelay(), expectedPage, requestId)
-        return
-      }
-    }
     goToNextPage()
   }, duration)
 }
@@ -2052,6 +1725,8 @@ async function initAfterLoad() {
   imageLoadCallbacks.clear()
   audioCacheCallbacks.clear()
   audioStartedForPage = -1
+  audioStartingForPage = -1
+  currentAudioBootstrapRetries = 0
   playHistoryId.value = ''
   playStartTime.value = 0
   cardVisible.value = false
@@ -2063,6 +1738,9 @@ async function initAfterLoad() {
   console.log(`[book] start preloading, ${content.value.pages.length} pages total`)
 
   await nextTick()
+
+  // 首次进入时让首图预热和首音频预热并行，避免首播音频等到 loading 结束后才开始下载
+  primeCurrentPageAudio(currentPage.value)
 
   // 首屏资源优先预热，减少首图和首句旁白等待
   await prepareInitialViewport(currentPage.value)
@@ -2129,11 +1807,7 @@ onLoad((options) => {
   contentId.value = options?.id || ''
 
   // 读取播放队列
-  const storedPlaylist = uni.getStorageSync(STORAGE_KEYS.PICTURE_BOOK_PLAYLIST)
-  const storedPlaylistMeta = uni.getStorageSync(STORAGE_KEYS.PICTURE_BOOK_PLAYLIST_META)
-  playlistMeta.value = storedPlaylistMeta && typeof storedPlaylistMeta === 'object'
-    ? storedPlaylistMeta as PlaylistMeta
-    : null
+  const storedPlaylist = uni.getStorageSync('picture_book_playlist')
   if (storedPlaylist && Array.isArray(storedPlaylist) && storedPlaylist.length > 1) {
     const idx = storedPlaylist.indexOf(contentId.value)
     if (idx >= 0) {
@@ -2146,6 +1820,10 @@ onLoad((options) => {
 
   const sysInfo = uni.getSystemInfoSync()
   statusBarHeight.value = sysInfo.statusBarHeight || 44
+  updateLayoutMode({
+    windowWidth: sysInfo.windowWidth || sysInfo.screenWidth,
+    windowHeight: sysInfo.windowHeight || sysInfo.screenHeight
+  })
 
   if (options?.autoplay === '1') {
     isPlaying.value = true
@@ -2153,6 +1831,14 @@ onLoad((options) => {
 })
 
 onMounted(() => {
+  const uniAny = uni as any
+  if (typeof uniAny.onWindowResize === 'function') {
+    windowResizeHandler = (res: any) => {
+      updateLayoutMode(res)
+    }
+    uniAny.onWindowResize(windowResizeHandler)
+  }
+
   loadContent()
 })
 
@@ -2170,6 +1856,11 @@ onShareTimeline(() => ({
 
 onUnmounted(() => {
   isUnmounted = true
+  const uniAny = uni as any
+  if (windowResizeHandler && typeof uniAny.offWindowResize === 'function') {
+    uniAny.offWindowResize(windowResizeHandler)
+    windowResizeHandler = null
+  }
   activeBookToken++
   imageWarmGeneration++
   invalidatePlaySessionRequest()
@@ -2638,7 +2329,7 @@ $font-story: -apple-system, 'PingFang SC', 'Hiragino Sans GB', sans-serif;
 // 滑动提示
 .swipe-hint {
   position: absolute;
-  bottom: calc(320rpx + env(safe-area-inset-bottom));
+  bottom: calc(220rpx + env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -2709,6 +2400,30 @@ $font-story: -apple-system, 'PingFang SC', 'Hiragino Sans GB', sans-serif;
 .pause-text {
   font-size: 30rpx;
   color: rgba(255, 255, 255, 0.8);
+}
+
+.storybook.landscape-mode {
+  .magic-bg {
+    opacity: 0.45;
+  }
+
+  .story-card {
+    display: none;
+  }
+
+  .story-image-thumb {
+    filter: blur(28rpx);
+    transform: scale(1.08);
+  }
+
+  .story-image-full {
+    opacity: 1;
+  }
+
+  .minimal-header {
+    padding-left: 24rpx;
+    padding-right: 24rpx;
+  }
 }
 
 // 切换绘本过渡

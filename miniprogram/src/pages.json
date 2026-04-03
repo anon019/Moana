@@ -93,7 +93,8 @@
           "path": "picture-book",
           "style": {
             "navigationStyle": "custom",
-            "navigationBarTitleText": "绘本播放"
+            "navigationBarTitleText": "绘本播放",
+            "pageOrientation": "auto"
           }
         },
         {
