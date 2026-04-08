@@ -96,13 +96,13 @@
         </view>
       </view>
       <!-- 播放状态指示 -->
-      <view class="play-indicator" :class="{ playing: isPlaying }">
+      <view v-if="showPlaybackChrome" class="play-indicator" :class="{ playing: isPlaying }">
         <view class="indicator-bar" v-for="i in 3" :key="i"></view>
       </view>
     </view>
 
     <!-- 翻页提示 (首次显示) -->
-    <view v-if="showSwipeHint && !isLandscape" class="swipe-hint">
+    <view v-if="showSwipeHint && showPlaybackChrome" class="swipe-hint">
       <view class="hint-hand">👆</view>
       <text class="hint-label">滑动翻页</text>
     </view>
@@ -165,7 +165,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, getCurrentInstance } from 'vue'
-import { onLoad, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
+import { onLoad, onShow, onShareAppMessage, onShareTimeline } from '@dcloudio/uni-app'
 import { useChildStore } from '@/stores/child'
 import { useContentStore } from '@/stores/content'
 import { startPlay, updateProgress, completePlay, submitInteraction } from '@/api/play'
@@ -200,6 +200,7 @@ const showSwipeHint = ref(false)
 const showComplete = ref(false)
 const statusBarHeight = ref(44)
 const showStoryText = computed(() => !isLandscape.value)
+const showPlaybackChrome = computed(() => !isLandscape.value)
 
 // 顺序播放队列
 const playlist = ref<string[]>([])
@@ -226,6 +227,7 @@ let pageAdvanceTimer: number | null = null
 let completeTimer: number | null = null  // 完成后自动返回的定时器
 let resumePlayTimer: number | null = null
 let audioBootstrapTimer: number | null = null
+let audioRecoveryTimer: number | null = null
 let windowResizeHandler: ((res: any) => void) | null = null
 const audioReady = ref(false)
 let currentAudioPage = -1
@@ -237,6 +239,7 @@ let currentAudioStartedOnce = false
 let currentAudioTime = 0
 let currentAudioDuration = 0
 let currentAudioBootstrapRetries = 0
+let currentAudioRecoveryRetries = 0
 let activeBookToken = 0
 let warmingNextBookId = ''
 let warmedNextBook: PictureBook | null = null
@@ -248,6 +251,7 @@ let retainedAudioBookIds: Set<string> | null = null
 const INITIAL_VIEWPORT_IMAGE_TIMEOUT = 700
 const AUDIO_BOOTSTRAP_TIMEOUT = 7000
 const MAX_AUDIO_BOOTSTRAP_RETRY = 1
+const AUDIO_RECOVERY_RETRY_DELAYS = [900, 1600, 2600, 4000]
 const MIN_AUDIO_FALLBACK_MS = 3500
 const MAX_AUDIO_FALLBACK_MS = 15000
 // 音频缓存：bookId:pageIndex:url -> 本地文件路径
@@ -311,9 +315,46 @@ function getViewportSize(payload?: any) {
   }
 }
 
-function updateLayoutMode(payload?: any) {
-  const { width, height } = getViewportSize(payload)
-  isLandscape.value = width > height
+function queryViewportSize(): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    nextTick(() => {
+      const proxy = instance?.proxy
+      if (!proxy) {
+        resolve(null)
+        return
+      }
+
+      uni.createSelectorQuery()
+        .in(proxy)
+        .select('.storybook')
+        .boundingClientRect((rect: any) => {
+          const width = Number(rect?.width || 0)
+          const height = Number(rect?.height || 0)
+          resolve(width > 0 && height > 0 ? { width, height } : null)
+        })
+        .exec()
+    })
+  })
+}
+
+async function updateLayoutMode(payload?: any) {
+  const hintedSize = getViewportSize(payload)
+  if (hintedSize.width > 0 && hintedSize.height > 0) {
+    isLandscape.value = hintedSize.width > hintedSize.height
+  }
+
+  const measuredSize = await queryViewportSize()
+  if (measuredSize) {
+    isLandscape.value = measuredSize.width > measuredSize.height
+  }
+}
+
+function refreshLayoutModeWithRetry(delays: number[] = [0, 120, 360]) {
+  delays.forEach((delay) => {
+    scheduleTimeout(() => {
+      void updateLayoutMode()
+    }, delay)
+  })
 }
 
 function notifyAudioCached(cacheKey: string) {
@@ -421,11 +462,7 @@ function requestCurrentPagePlayback(pageIndex = currentPage.value) {
   }
 
   audioStartingForPage = pageIndex
-  void playCurrentPageAudio().finally(() => {
-    if (audioStartingForPage === pageIndex && audioStartedForPage !== pageIndex) {
-      audioStartingForPage = -1
-    }
-  })
+  void playCurrentPageAudio()
 }
 
 function getFallbackDelay(page?: PictureBookPage) {
@@ -451,6 +488,37 @@ function schedulePageAdvance(delay = 600, expectedPage = currentPage.value, requ
   }, delay)
 }
 
+function cancelAudioRecoveryTimer() {
+  cancelTimeout(audioRecoveryTimer)
+  audioRecoveryTimer = null
+}
+
+function scheduleAudioRecovery(pageIndex: number, requestId: number, reason: string) {
+  cancelAudioRecoveryTimer()
+
+  if (!content.value?.pages?.[pageIndex]?.audio_url) {
+    startFallbackTimer(undefined, pageIndex, requestId)
+    return
+  }
+
+  const retryIndex = Math.min(currentAudioRecoveryRetries, AUDIO_RECOVERY_RETRY_DELAYS.length - 1)
+  const delay = AUDIO_RECOVERY_RETRY_DELAYS[retryIndex]
+  currentAudioRecoveryRetries++
+  audioReady.value = false
+  audioStartedForPage = -1
+  audioStartingForPage = -1
+
+  console.warn(`[绘本音频] 第 ${pageIndex + 1} 页未真正起播，${delay}ms 后重试（${reason}，第 ${currentAudioRecoveryRetries} 次恢复）`)
+
+  audioRecoveryTimer = scheduleTimeout(() => {
+    audioRecoveryTimer = null
+    if (!isPlaying.value || loading.value || showTransition.value) return
+    if (pageIndex !== currentPage.value) return
+    if (requestId !== currentAudioRequestId) return
+    requestCurrentPagePlayback(pageIndex)
+  }, delay)
+}
+
 function startAudioBootstrapWatchdog(pageIndex: number, requestId: number) {
   cancelAudioBootstrapTimer()
   audioBootstrapTimer = scheduleTimeout(() => {
@@ -458,7 +526,7 @@ function startAudioBootstrapWatchdog(pageIndex: number, requestId: number) {
     if (!isPlaying.value || loading.value || showTransition.value) return
     if (pageIndex !== currentPage.value) return
     if (requestId !== currentAudioRequestId) return
-    if (currentAudioStartedOnce || audioReady.value) return
+    if (currentAudioStartedOnce) return
 
     if (currentAudioBootstrapRetries < MAX_AUDIO_BOOTSTRAP_RETRY && content.value?.pages?.[pageIndex]?.audio_url) {
       currentAudioBootstrapRetries++
@@ -469,8 +537,8 @@ function startAudioBootstrapWatchdog(pageIndex: number, requestId: number) {
       return
     }
 
-    console.warn(`[绘本音频] 第 ${pageIndex + 1} 页长时间未就绪，使用保守降级计时`)
-    startFallbackTimer(undefined, pageIndex, requestId)
+    console.warn(`[绘本音频] 第 ${pageIndex + 1} 页长时间未真正起播，保持当前页并继续重试`)
+    scheduleAudioRecovery(pageIndex, requestId, 'bootstrap-timeout')
   }, AUDIO_BOOTSTRAP_TIMEOUT)
 }
 
@@ -813,6 +881,7 @@ function onPageChange(e: any) {
   const newPage = e.detail.current
   cancelPageAdvanceTimer()
   cancelAudioBootstrapTimer()
+  cancelAudioRecoveryTimer()
   stopAutoPlay()
   currentPage.value = newPage
   cardVisible.value = false
@@ -820,6 +889,7 @@ function onPageChange(e: any) {
   audioStartedForPage = -1  // 重置防重复标记
   audioStartingForPage = -1
   currentAudioBootstrapRetries = 0
+  currentAudioRecoveryRetries = 0
   cancelTimeout(resumePlayTimer)
   resumePlayTimer = null
 
@@ -872,6 +942,7 @@ function handleTap() {
     resumePlayTimer = null
     cancelPageAdvanceTimer()
     cancelAudioBootstrapTimer()
+    cancelAudioRecoveryTimer()
     pauseCurrentAudio()
     stopAutoPlay()
   }
@@ -1092,10 +1163,7 @@ function ensureAudioContext() {
   audioContext.onCanplay(() => {
     if (currentAudioPage === currentPage.value) {
       audioReady.value = true
-      audioStartedForPage = currentAudioPage
-      audioStartingForPage = -1
       currentAudioDuration = Math.max(currentAudioDuration, Number(audioContext?.duration || 0))
-      cancelAudioBootstrapTimer()
     }
   })
 
@@ -1103,9 +1171,11 @@ function ensureAudioContext() {
     if (currentAudioPage === currentPage.value) {
       audioReady.value = true
       currentAudioStartedOnce = true
+      currentAudioRecoveryRetries = 0
       audioStartedForPage = currentAudioPage
       audioStartingForPage = -1
       currentAudioDuration = Math.max(currentAudioDuration, Number(audioContext?.duration || 0))
+      cancelAudioRecoveryTimer()
       cancelAudioBootstrapTimer()
     }
   })
@@ -1114,6 +1184,7 @@ function ensureAudioContext() {
     if (currentAudioPage !== currentPage.value) return
 
     currentAudioStartedOnce = true
+    currentAudioRecoveryRetries = 0
     currentAudioTime = Number(audioContext?.currentTime || 0)
     const duration = Number(audioContext?.duration || 0)
     if (duration > 0) {
@@ -1152,6 +1223,11 @@ function ensureAudioContext() {
       return
     }
 
+    if (currentAudioPage === currentPage.value && isPlaying.value && content.value?.pages?.[currentAudioPage]?.audio_url && !currentAudioStartedOnce) {
+      scheduleAudioRecovery(currentAudioPage, currentAudioRequestId, 'audio-error')
+      return
+    }
+
     startFallbackTimer(undefined, currentAudioPage, currentAudioRequestId)
   })
 
@@ -1164,6 +1240,7 @@ async function playCurrentPageAudio() {
 
   cancelPageAdvanceTimer()
   cancelAudioBootstrapTimer()
+  cancelAudioRecoveryTimer()
   stopAutoPlay()
   const pageIndex = currentPage.value
   const page = content.value.pages[pageIndex]
@@ -1201,6 +1278,9 @@ async function playCurrentPageAudio() {
     const cachedPath = await waitForAudioCache(pageIndex, page.audio_url, 220)
 
     if (requestId !== currentAudioRequestId || !isPlaying.value || currentPage.value !== pageIndex) {
+      if (audioStartingForPage === pageIndex && !currentAudioStartedOnce) {
+        audioStartingForPage = -1
+      }
       return
     }
 
@@ -1220,6 +1300,7 @@ async function playCurrentPageAudio() {
     currentAudioCacheKey = ''
     currentAudioNetworkSrc = ''
     currentAudioUsesCachedFile = false
+    currentAudioRecoveryRetries = 0
     audioStartedForPage = pageIndex
     audioStartingForPage = -1
     // 无音频，使用定时器
@@ -1236,6 +1317,7 @@ function pauseCurrentAudio() {
 function stopCurrentAudio() {
   cancelPageAdvanceTimer()
   cancelAudioBootstrapTimer()
+  cancelAudioRecoveryTimer()
   stopAutoPlay()
   currentAudioRequestId++
   if (audioContext) {
@@ -1246,6 +1328,7 @@ function stopCurrentAudio() {
   currentAudioTime = 0
   currentAudioDuration = 0
   currentAudioBootstrapRetries = 0
+  currentAudioRecoveryRetries = 0
   currentAudioPage = -1
   audioStartingForPage = -1
   currentAudioUsesCachedFile = false
@@ -1256,6 +1339,7 @@ function stopCurrentAudio() {
 function destroyCurrentAudio() {
   cancelPageAdvanceTimer()
   cancelAudioBootstrapTimer()
+  cancelAudioRecoveryTimer()
   stopAutoPlay()
   currentAudioRequestId++
   if (audioContext) {
@@ -1267,6 +1351,7 @@ function destroyCurrentAudio() {
   currentAudioTime = 0
   currentAudioDuration = 0
   currentAudioBootstrapRetries = 0
+  currentAudioRecoveryRetries = 0
   currentAudioPage = -1
   audioStartingForPage = -1
   currentAudioCacheKey = ''
@@ -1469,6 +1554,7 @@ function onAudioEnded() {
 function startFallbackTimer(delayMs?: number, expectedPage = currentPage.value, requestId = currentAudioRequestId) {
   cancelPageAdvanceTimer()
   cancelAudioBootstrapTimer()
+  cancelAudioRecoveryTimer()
   stopAutoPlay()
   if (isUnmounted || !content.value?.pages?.length || !isPlaying.value) return
 
@@ -1480,6 +1566,10 @@ function startFallbackTimer(delayMs?: number, expectedPage = currentPage.value, 
     if (!isPlaying.value || loading.value || showTransition.value) return
     if (expectedPage !== currentPage.value) return
     if (requestId !== currentAudioRequestId) return
+    if (page?.audio_url && !currentAudioStartedOnce) {
+      scheduleAudioRecovery(expectedPage, requestId, 'fallback-guard')
+      return
+    }
     goToNextPage()
   }, duration)
 }
@@ -1727,12 +1817,14 @@ async function initAfterLoad() {
   audioStartedForPage = -1
   audioStartingForPage = -1
   currentAudioBootstrapRetries = 0
+  currentAudioRecoveryRetries = 0
   playHistoryId.value = ''
   playStartTime.value = 0
   cardVisible.value = false
   showPauseOverlay.value = false
   cancelPageAdvanceTimer()
   cancelAudioBootstrapTimer()
+  cancelAudioRecoveryTimer()
   stopAutoPlay()
 
   console.log(`[book] start preloading, ${content.value.pages.length} pages total`)
@@ -1820,10 +1912,11 @@ onLoad((options) => {
 
   const sysInfo = uni.getSystemInfoSync()
   statusBarHeight.value = sysInfo.statusBarHeight || 44
-  updateLayoutMode({
+  void updateLayoutMode({
     windowWidth: sysInfo.windowWidth || sysInfo.screenWidth,
     windowHeight: sysInfo.windowHeight || sysInfo.screenHeight
   })
+  refreshLayoutModeWithRetry([80, 240])
 
   if (options?.autoplay === '1') {
     isPlaying.value = true
@@ -1834,12 +1927,18 @@ onMounted(() => {
   const uniAny = uni as any
   if (typeof uniAny.onWindowResize === 'function') {
     windowResizeHandler = (res: any) => {
-      updateLayoutMode(res)
+      void updateLayoutMode(res)
+      refreshLayoutModeWithRetry([120, 320])
     }
     uniAny.onWindowResize(windowResizeHandler)
   }
 
+  refreshLayoutModeWithRetry()
   loadContent()
+})
+
+onShow(() => {
+  refreshLayoutModeWithRetry()
 })
 
 onShareAppMessage(() => ({
@@ -2408,6 +2507,12 @@ $font-story: -apple-system, 'PingFang SC', 'Hiragino Sans GB', sans-serif;
   }
 
   .story-card {
+    display: none;
+  }
+
+  .page-dots,
+  .swipe-hint,
+  .play-indicator {
     display: none;
   }
 
