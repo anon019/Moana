@@ -254,6 +254,9 @@ const MAX_AUDIO_BOOTSTRAP_RETRY = 1
 const AUDIO_RECOVERY_RETRY_DELAYS = [900, 1600, 2600, 4000]
 const MIN_AUDIO_FALLBACK_MS = 3500
 const MAX_AUDIO_FALLBACK_MS = 15000
+const NEXT_PAGE_IMAGE_TIMEOUT = 3000
+const LANDSCAPE_PAGE_IMAGE_TIMEOUT = 12000
+const NEXT_PAGE_IMAGE_RETRY_DELAY = 900
 // 音频缓存：bookId:pageIndex:url -> 本地文件路径
 const audioCache = new Map<string, string>()
 // 图片预热去重，避免频繁重复 getImageInfo
@@ -456,8 +459,31 @@ function canAutoStartCurrentPage(pageIndex = currentPage.value) {
     && pageIndex === currentPage.value
 }
 
+function getCriticalImageSrc(page?: PictureBookPage, preferFull = isLandscape.value) {
+  if (!page) return ''
+  return preferFull
+    ? (page.image_url || page.image_thumb_url || '')
+    : (page.image_thumb_url || page.image_url || '')
+}
+
+function isPagePrimaryImageReady(pageIndex: number) {
+  const page = content.value?.pages?.[pageIndex]
+  if (!page) return false
+  if (!page.image_url) return true
+  return !!imageLoaded.value[pageIndex]
+}
+
+function shouldBlockPlaybackForImage(pageIndex = currentPage.value) {
+  return isLandscape.value && !isPagePrimaryImageReady(pageIndex)
+}
+
 function requestCurrentPagePlayback(pageIndex = currentPage.value) {
   if (!canAutoStartCurrentPage(pageIndex) || audioStartedForPage === pageIndex || audioStartingForPage === pageIndex) {
+    return
+  }
+
+  if (shouldBlockPlaybackForImage(pageIndex)) {
+    preloadAdjacentImages(pageIndex, 1)
     return
   }
 
@@ -757,9 +783,10 @@ function warmBookEntryAssets(book: PictureBook, startPage = 0): Promise<void> {
     ])
     : Promise.resolve()
 
-  const criticalImageReady = current?.image_thumb_url || current?.image_url
+  const criticalImageReadySrc = getCriticalImageSrc(current, true)
+  const criticalImageReady = criticalImageReadySrc
     ? Promise.race([
-      warmImage(current.image_thumb_url || current.image_url, 900),
+      warmImage(criticalImageReadySrc, 900),
       waitMs(900)
     ])
     : Promise.resolve()
@@ -1366,7 +1393,8 @@ async function goToNextPage() {
 
   cancelPageAdvanceTimer()
   stopAutoPlay()
-  let nextPage = currentPage.value + 1
+  const sourcePage = currentPage.value
+  let nextPage = sourcePage + 1
 
   if (nextPage >= totalPages.value) {
     // 有播放队列且不止一本 → 切换到下一本
@@ -1379,10 +1407,27 @@ async function goToNextPage() {
     console.log('[绘本] 循环播放：回到第一页')
   }
 
-  // 等待下一页图片加载完成（最多等 3 秒）
-  if (!imageLoaded.value[nextPage]) {
+  // 横屏下必须等下一页原图 ready，避免停留在模糊缩略图时继续播完
+  const canPreloadBeforeSwitch = nextPage === sourcePage + 1
+  if (canPreloadBeforeSwitch && !isPagePrimaryImageReady(nextPage)) {
     console.log(`[绘本] 等待下一页 ${nextPage + 1} 图片加载...`)
-    await waitForImageLoad(nextPage, 3000)
+    preloadAdjacentImages(nextPage, 1)
+    const ready = await waitForImageLoad(
+      nextPage,
+      isLandscape.value ? LANDSCAPE_PAGE_IMAGE_TIMEOUT : NEXT_PAGE_IMAGE_TIMEOUT
+    )
+
+    if (!ready) {
+      if (!isPlaying.value || currentPage.value !== sourcePage) return
+      console.warn(`[绘本] 第 ${nextPage + 1} 页原图未就绪，暂停自动翻页并继续等待`)
+      pageAdvanceTimer = scheduleTimeout(() => {
+        pageAdvanceTimer = null
+        if (!isPlaying.value || loading.value || showTransition.value) return
+        if (currentPage.value !== sourcePage) return
+        void goToNextPage()
+      }, NEXT_PAGE_IMAGE_RETRY_DELAY)
+      return
+    }
   }
 
   // 再次检查播放状态
@@ -1423,9 +1468,10 @@ async function prepareInitialViewport(targetPage = currentPage.value, excludeInd
   preloadAdjacentImages(safePage, 3, excludeIndices)
 
   const firstPage = content.value.pages[safePage]
+  const firstImageSrc = getCriticalImageSrc(firstPage, true)
   const firstImageReady = Promise.race([
     waitForImageLoad(safePage, INITIAL_VIEWPORT_IMAGE_TIMEOUT).then(() => undefined),
-    warmImage(firstPage?.image_thumb_url || firstPage?.image_url, INITIAL_VIEWPORT_IMAGE_TIMEOUT),
+    warmImage(firstImageSrc, INITIAL_VIEWPORT_IMAGE_TIMEOUT),
     waitMs(INITIAL_VIEWPORT_IMAGE_TIMEOUT)
   ])
   await firstImageReady
