@@ -7,12 +7,14 @@ from moana.services.video.base import BaseVideoService, VideoResult
 def get_video_service() -> BaseVideoService:
     """Factory function to get video service based on config."""
     settings = get_settings()
-    provider = settings.video_provider
+    provider = settings.video_provider.strip().lower()
+    if provider == "disabled":
+        raise ValueError("video 生成已停用；gpt-6-luna 仅用于文本处理。")
+    if provider in {"veo", "gemini", "vertex", "vertexai", "google"}:
+        from moana.services.gemini_client import get_gemini_client
+        get_gemini_client()
 
     match provider:
-        case "veo":
-            from moana.services.video.google_veo import GoogleVeoService
-            return GoogleVeoService()
         case "wanx":
             from moana.services.video.wanx import WanxVideoService
             return WanxVideoService()

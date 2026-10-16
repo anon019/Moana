@@ -32,6 +32,12 @@ class OpenRouterService(BaseLLMService):
         settings = get_settings()
         self._api_key = settings.openrouter_api_key
         self._model = settings.openrouter_model
+        model_name = self._model.strip().lower()
+        if model_name.startswith("google/") or any(
+            token in model_name for token in ("gemini", "vertex", "imagen", "veo")
+        ):
+            from moana.services.gemini_client import get_gemini_client
+            get_gemini_client()
         self._site_url = settings.openrouter_site_url
         self._site_name = settings.openrouter_site_name
 

@@ -4,7 +4,7 @@ from enum import Enum
 
 
 class ImageStyle(str, Enum):
-    """Image style presets - supports all Nano Banana Pro styles."""
+    """Image style presets for picture-book illustrations."""
 
     # === 儿童内容风格 ===
     STORYBOOK = "storybook"          # 绘本插画风格

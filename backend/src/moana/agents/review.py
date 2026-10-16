@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from moana.services.llm.gemini import GeminiService
+from moana.services.llm import get_llm_service
 from moana.services.moderation import AliyunModerationService, ModerationResult
 
 
@@ -44,7 +44,7 @@ class ReviewAgent:
     """Agent for reviewing and moderating content."""
 
     def __init__(self):
-        self._llm = GeminiService()
+        self._llm = get_llm_service()
         self._moderation = AliyunModerationService()
 
     async def review_text(self, text: str) -> ReviewResult:

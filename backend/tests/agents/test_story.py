@@ -32,7 +32,7 @@ async def test_story_agent_generate_outline():
         total_interactions=2,
     )
 
-    with patch("moana.agents.story.ClaudeService") as MockLLM:
+    with patch("moana.agents.story.get_llm_service") as MockLLM:
         mock_llm = MockLLM.return_value
         mock_llm.generate_structured = AsyncMock(return_value=mock_outline)
 

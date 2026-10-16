@@ -9,7 +9,7 @@ from moana.agents.schemas import PictureBookOutline
 
 @dataclass
 class StoryEnhancement:
-    """故事增强配置（全部可选，由 Gemini 智能推断）."""
+    """故事增强配置（全部可选，由配置的文本模型智能推断）."""
     narrative_pace: str | None = None      # relaxed/lively/progressive
     interaction_density: str | None = None  # minimal/moderate/intensive
     educational_focus: str | None = None    # cognitive/behavioral/emotional/imaginative
@@ -20,7 +20,7 @@ class StoryEnhancement:
 
 @dataclass
 class VisualEnhancement:
-    """视觉增强配置（全部可选，由 Gemini 智能推断）."""
+    """视觉增强配置（全部可选，由配置的文本模型智能推断）."""
     time_atmosphere: str | None = None      # morning/afternoon/sunset/night/dreamy
     scene_environment: str | None = None    # indoor/garden/forest/beach/clouds
     emotional_tone: str | None = None       # cheerful/cozy/playful/peaceful/curious
@@ -35,8 +35,8 @@ class StyleConfig:
     """绘本风格配置."""
     art_style: str = "pixar_3d"
     protagonist_animal: str = "bunny"
-    protagonist_color: str = "white"
-    protagonist_accessory: str = "blue overalls"
+    protagonist_color: str = "white"  # 实际默认色由 pipeline 层按动物类型决定
+    protagonist_accessory: str | None = None
     color_palette: str = "pastel"
     # 新增：增强配置
     story_enhancement: StoryEnhancement | None = None
@@ -54,12 +54,15 @@ ART_STYLE_EXAMPLES = {
 
 # 主角动物映射表
 PROTAGONIST_PROMPTS = {
-    "bunny": "bunny character with pink inner ears",
-    "bear": "bear cub character",
-    "cat": "cat character with whiskers",
-    "dog": "puppy character with floppy ears",
-    "panda": "panda character",
-    "fox": "fox character with a fluffy tail",
+    "bunny": "bunny character with long upright ears with pink inner ears, round head, big sparkling eyes, small button nose, short fluffy tail, soft chubby body",
+    "bear": "bear cub character with round ears on top of head, small beady eyes, wide snout with a little nose, chubby round body, short stubby limbs, friendly smile",
+    "cat": "cat character with pointy triangle ears, large bright eyes with slit pupils, long whiskers, small pink nose, slender body, long swaying tail",
+    "dog": "puppy character with big floppy droopy ears, large round puppy eyes, wet black nose, wagging short tail, soft chubby body, tongue slightly out",
+    "panda": "panda character with round ears, iconic black eye patches, black and white fur pattern, round plump body, short limbs, gentle calm expression",
+    "fox": "fox character with large pointy ears with dark tips, narrow bright eyes, long pointed snout, big fluffy tail with a white tip, slender agile body",
+    "elephant": "baby elephant character with very big floppy ears, tiny kind eyes, long curving trunk, round stout body, thick sturdy legs, small thin tail",
+    "monkey": "monkey character with round face, big curious eyes, wide grin, small round ears on sides of head, long curly tail, lean agile body, expressive eyebrows",
+    "penguin": "penguin character with round belly, black and white tuxedo-like body, small flipper wings, short orange beak, tiny dot eyes, waddling upright posture",
 }
 
 # 配饰映射表
@@ -88,13 +91,28 @@ COLOR_PALETTE_PROMPTS = {
 
 # 配角设定（固定）
 SUPPORTING_CHARACTERS = {
-    "小猫": "a cute orange tabby cat character with a red bow",
-    "小狗": "a cute brown puppy character with floppy ears",
-    "小熊": "a cute brown bear cub character with a yellow scarf",
-    "小兔子": "a cute white bunny character with pink inner ears",
-    "小熊猫": "a cute panda character with round ears",
-    "小狐狸": "a cute orange fox character with a fluffy tail",
+    "小猫": "a cute orange tabby cat character with pointy ears, large bright eyes, long whiskers, a red bow on head",
+    "小狗": "a cute brown puppy character with big floppy droopy ears, round puppy eyes, wet black nose, wagging tail",
+    "小熊": "a cute brown bear cub character with round ears, small beady eyes, chubby body, wearing a yellow scarf",
+    "小兔子": "a cute white bunny character with long upright ears with pink inner ears, big sparkling eyes, fluffy tail",
+    "小熊猫": "a cute panda character with round ears, black eye patches, black and white fur, round plump body",
+    "小狐狸": "a cute orange fox character with large pointy ears, narrow bright eyes, big fluffy tail with white tip",
 }
+
+
+def build_protagonist_desc(style: StyleConfig) -> str:
+    """根据风格配置构建主角描述.
+
+    此函数是主角描述的唯一构建入口，被系统提示词和管线层共同使用，
+    确保两处的角色描述始终一致。
+    """
+    animal_desc = PROTAGONIST_PROMPTS.get(style.protagonist_animal, PROTAGONIST_PROMPTS["bunny"])
+    desc = f"a cute {style.protagonist_color} {animal_desc}"
+    if style.protagonist_accessory:
+        accessory_desc = ACCESSORY_PROMPTS.get(style.protagonist_accessory)
+        if accessory_desc:
+            desc += f", {accessory_desc}"
+    return desc
 
 
 def build_system_prompt(style: StyleConfig) -> str:
@@ -106,9 +124,7 @@ def build_system_prompt(style: StyleConfig) -> str:
     """
 
     # 构建主角描述
-    animal_desc = PROTAGONIST_PROMPTS.get(style.protagonist_animal, PROTAGONIST_PROMPTS["bunny"])
-    accessory_desc = ACCESSORY_PROMPTS.get(style.protagonist_accessory, "wearing blue overalls")
-    protagonist_desc = f"a cute {style.protagonist_color} {animal_desc}, {accessory_desc}"
+    protagonist_desc = build_protagonist_desc(style)
 
     # 获取色彩风格
     color_desc = COLOR_PALETTE_PROMPTS.get(style.color_palette, COLOR_PALETTE_PROMPTS["pastel"])
@@ -188,19 +204,31 @@ def build_system_prompt(style: StyleConfig) -> str:
 2. 色彩风格：{color_desc}
    - 每页图像都应该符合这个色彩基调
 
-3. 主角设定（保持一致）：
-   - 描述为: "{protagonist_desc}"
-   - 每页都要出现主角，保持造型一致
+3. 【角色一致性 - 最重要的规则】：
+   - 主角固定描述（以下称为 PROTAGONIST_TAG）: "{protagonist_desc}"
+   - ⚠️ 每一页的 image_prompt 都必须【逐字复制】上面的 PROTAGONIST_TAG，不可省略、改写或简化
+   - 不要用代词（如 "the bunny", "it"）替代完整描述，每页都要写完整的角色描述
+   - 如果主角与某个物品互动（如抱着大苹果），主角描述必须在前，动作和物品在后
+   - 主角在画面中必须是视觉焦点，占画面显著位置，不能被遮挡或缩小到看不清
 
-4. 配角设定：
+4. 【道具/物品一致性】：
+   - 如果故事中有一个核心道具或物品（如"大苹果"、"红气球"），请在第一页定义它的英文描述（大小、颜色、形状）
+   - 之后每一页该物品出现时，必须使用【完全相同的英文描述】
+   - 物品的大小比例要保持一致：如果第一页苹果比主角还大，后面每页都要保持这个比例
+   - 不要在某些页面突然替换或省略核心道具
+
+5. 配角设定：
    - 小猫: "a cute orange tabby cat character with a red bow"
    - 小狗: "a cute brown puppy character with floppy ears"
    - 小熊: "a cute brown bear cub character with a yellow scarf"
+   - 配角出现时也要使用完整描述，不要简化
 
-5. 禁止事项：
+6. 禁止事项：
    - 不要使用 boy、girl、child、toddler、kid 等人类词汇
    - 不要使用人名
    - 不要在图片中包含任何文字（添加 "no text or letters in image"）
+   - 不要在不同页面改变主角的外观特征（颜色、配饰、体型）
+   - 不要引入提示词中未定义的新角色或物品来替代主角
 
 【故事创作增强指引】
 用户希望的故事风格：
@@ -217,13 +245,15 @@ def build_system_prompt(style: StyleConfig) -> str:
 - cheerful → "bright colors, happy expressions, dynamic poses"
 - close_up → "character close-up shot, detailed expressions"
 
-6. image_prompt 格式要求：
+7. image_prompt 格式要求（严格遵守此结构）：
    - 必须是英文
-   - 开头包含风格描述词
-   - 结尾添加 "{color_desc}, child-friendly, no text or letters in image"
+   - 格式：[风格描述], [PROTAGONIST_TAG 逐字复制], [动作和表情], [核心道具完整描述], [场景背景], {color_desc}, child-friendly, no text or letters in image
+   - 每页的 PROTAGONIST_TAG 部分必须与第3条中的描述完全一致，一个词都不能少
 
-7. 示例（风格为 chibi 时）：
-   "Chibi style illustration, super deformed, {protagonist_desc}, sitting at a dining table holding a spoon, cheerful expression, cozy kitchen background, kawaii aesthetic, {color_desc}, child-friendly, no text or letters in image"
+8. 示例（风格为 chibi 时，主角与大苹果互动的故事）：
+   第1页: "Chibi style illustration, super deformed, {protagonist_desc}, standing next to a giant shiny red apple twice the size of the character, looking up with amazed expression, sunny garden background, kawaii aesthetic, {color_desc}, child-friendly, no text or letters in image"
+   第2页: "Chibi style illustration, super deformed, {protagonist_desc}, hugging a giant shiny red apple twice the size of the character, happy laughing expression, sunny garden background, kawaii aesthetic, {color_desc}, child-friendly, no text or letters in image"
+   注意：两页中主角描述和苹果描述完全一致，只有动作和表情不同。
 
 图像提示词必须是英文！"""
 

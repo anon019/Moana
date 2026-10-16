@@ -10,7 +10,6 @@ import logging
 import struct
 import wave
 
-from google import genai
 from google.genai import types
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -92,10 +91,10 @@ class GeminiTTSService(BaseTTSService):
 
     def __init__(self):
         settings = get_settings()
-        self._api_key = settings.google_api_key
         self._model = settings.gemini_tts_model
         self._default_voice = settings.gemini_tts_voice
-        self._client = genai.Client(api_key=self._api_key)
+        from moana.services.gemini_client import get_gemini_client
+        self._client = get_gemini_client()
         logger.info(f"GeminiTTSService initialized with model: {self._model}")
 
     @property

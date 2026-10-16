@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+from pathlib import Path
 import time
 from datetime import datetime
 from typing import Annotated, Optional, Any
@@ -221,7 +222,10 @@ async def get_style_options():
     - video_motion_styles: 视频动效风格
     """
     from moana.styles import get_style_options as get_all_options
-    return get_all_options()
+    options = get_all_options()
+    voices = await get_tts_voices()
+    options["tts_voices"] = [voice for provider in voices["providers"] for voice in provider["voices"]]
+    return options
 
 
 # ========== TTS Voices API ==========
@@ -232,44 +236,34 @@ VOICE_PREVIEW_BASE_URL = f"{get_settings().storage_base_url.rstrip('/')}/voice-p
 
 @router.get("/tts/voices")
 async def get_tts_voices():
-    """获取所有可用的 TTS 音色列表.
+    """返回当前 Fish 在线服务配置的中文音色，试听仅引用已生成文件。"""
+    from moana.services.tts import get_tts_service
 
-    前端用于展示音色选择界面，支持试听预览。
-    当前仅支持 Gemini TTS，预留扩展其他提供商。
-
-    返回：
-    - providers: TTS 提供商列表，每个包含音色数组
-    - default_provider: 默认提供商 ID
-    - default_voice: 默认音色 ID
-    """
-    from moana.services.tts.gemini import GeminiTTSService
-
-    # Gemini TTS 音色
-    gemini_voices = []
-    for voice_id, info in GeminiTTSService.VOICES.items():
-        gemini_voices.append({
-            "id": voice_id,
-            "name": info["name"],
-            "name_cn": info["name_cn"],
-            "gender": info["gender"],
-            "style": info["style"],
-            "description": info["description"],
-            "recommended": voice_id == GeminiTTSService.DEFAULT_VOICE,
-            "preview_url": f"{VOICE_PREVIEW_BASE_URL}/gemini/{voice_id}.wav",
-        })
-
+    settings = get_settings()
+    service = get_tts_service()
+    try:
+        voices = []
+        for voice in await service.list_voices(language="zh"):
+            preview_key = f"voice-preview/fish_speech/{voice.id}.mp3"
+            preview_path = Path(settings.storage_local_path) / preview_key
+            preview_url = (settings.storage_base_url.rstrip("/") + "/" + preview_key
+                           if preview_path.is_file() else None)
+            voices.append({
+                "id": voice.id, "name": voice.name, "name_cn": voice.name,
+                "gender": voice.gender or "neutral", "style": "中文旁白",
+                "description": "Fish Audio 在线中文语音",
+                "recommended": voice.id == settings.fish_speech_voice_id,
+                "preview_url": preview_url,
+            })
+    finally:
+        close = getattr(service, "close", None)
+        if close is not None:
+            await close()
     return {
-        "providers": [
-            {
-                "id": "gemini",
-                "name": "Google Gemini",
-                "description": "谷歌 Gemini 2.5 Flash TTS，高质量语音合成",
-                "voices": gemini_voices,
-            }
-            # 预留：未来可添加 qwen, minimax 等提供商
-        ],
-        "default_provider": "gemini",
-        "default_voice": GeminiTTSService.DEFAULT_VOICE,
+        "providers": [{"id": "fish_speech", "name": "Fish Audio",
+                       "description": "Fish Audio 在线语音 CLI", "voices": voices}],
+        "default_provider": "fish_speech",
+        "default_voice": settings.fish_speech_voice_id or None,
     }
 
 
@@ -658,25 +652,20 @@ async def get_asset_details(
     # 素材列表（每个只包含独有内容）
     assets = []
 
-    # 获取默认模型名称（用于 fallback 旧数据中的 "unknown"）
-    from moana.config import get_settings
-    settings = get_settings()
-    default_image_model = settings.gemini_image_model  # "gemini-3.1-flash-image-preview"
-    default_tts_model = settings.gemini_tts_model  # "gemini-2.5-flash-preview-tts"
-
-    def get_model_name(stored_value: str, default: str) -> str:
-        """获取模型名称，如果存储值为 unknown 则使用默认值."""
-        return default if stored_value == "unknown" else stored_value
+    # 历史记录只能展示已保存的来源；未知模型不可替换为当前模型。
+    generated_by = content.generated_by or {}
 
     if content.content_type.value == "picture_book":
         # 从 style_config 获取风格信息
         style_config = content_data.get("style_config", {})
-        default_voice_id = personalization.get("voice_id", "Kore")
+        default_voice_id = generated_by.get("tts_voice_id") or personalization.get("voice_id")
 
         # 通用图片配置（只记录一次）
-        image_model = content.generated_by.get("image_model", "unknown")
+        image_model = generated_by.get("image_model") or "unknown"
         generation_config["image"] = {
-            "model": get_model_name(image_model, default_image_model),
+            "model": image_model,
+            "requested_model": generated_by.get("requested_image_model"),
+            "tool": generated_by.get("image_tool"),
             "style": style_config.get("art_style", "pixar_3d"),
             "width": 1024,
             "height": 1024,
@@ -689,9 +678,9 @@ async def get_asset_details(
         }
 
         # 通用音频配置（只记录一次）
-        tts_model = content.generated_by.get("tts_model", "unknown")
+        tts_model = generated_by.get("tts_model") or "unknown"
         generation_config["audio"] = {
-            "model": get_model_name(tts_model, default_tts_model),
+            "model": tts_model,
             "voice_id": default_voice_id,
         }
 
@@ -706,6 +695,9 @@ async def get_asset_details(
                     "page_num": page_num,
                     "url": page.get("image_url"),
                     "prompt": page.get("image_prompt", ""),
+                    "model": page.get("image_model", image_model),
+                    "requested_model": page.get("requested_image_model", generated_by.get("requested_image_model")),
+                    "tool": page.get("image_tool", generated_by.get("image_tool")),
                 })
 
             # 音频素材：只记录 text 和 duration（独有内容）
@@ -716,6 +708,8 @@ async def get_asset_details(
                     "url": page.get("audio_url"),
                     "text": page.get("text", ""),
                     "duration": page.get("audio_duration", 0),
+                    "model": page.get("audio_model", tts_model),
+                    "voice_id": page.get("audio_voice_id", default_voice_id),
                 })
 
     elif content.content_type.value == "nursery_rhyme":
@@ -724,7 +718,7 @@ async def get_asset_details(
 
         # 提示词增强配置
         generation_config["prompt_enhancement"] = {
-            "model": content.generated_by.get("prompt_model", "gemini-3-flash-preview"),
+            "model": generated_by.get("prompt_model") or "unknown",
             "user_prompt": content_data.get("user_prompt", ""),
             "enhanced_prompt": content_data.get("enhanced_prompt", ""),
         }
@@ -1446,8 +1440,8 @@ async def _auto_repair_content(
     """自动修复失败的页面（图片/音频），修复后更新 DB 状态为 ready.
 
     修复策略：
-    - 图片失败: 用同一个 Gemini 服务重试（间隔递增，避免连续触发限制）
-    - 音频失败: 按 TTS fallback 链重试（gemini → qwen → minimax）
+    - 图片失败：仅使用当前 GPT Image CLI 重试
+    - 音频失败：仅使用当前 Fish 在线服务，禁止收费供应商及本地模型回退
     - 每次修复成功立即更新 DB 中对应页
     - 全部修复完成后 status → ready
     """
@@ -1479,11 +1473,12 @@ async def _do_auto_repair(
     """实际执行自动修复逻辑（由 _auto_repair_content 包裹异常处理）."""
     from moana.services.image import get_image_service
     from moana.services.image.base import ImageStyle
-    from moana.services.image.gemini import GeminiImageContentError
-    from moana.pipelines.picture_book import PictureBookPipeline
+    from moana.services.tts import get_tts_service
 
-    image_service = get_image_service()
-    pipeline = PictureBookPipeline()
+    image_service = get_image_service() if any(page.get("image_failed") for page in failed_pages) else None
+    tts_service = get_tts_service() if any(page.get("audio_failed") for page in failed_pages) else None
+    if tts_service is not None:
+        tts_service.validate_configuration(voice_id)
     repaired_count = 0
 
     for page_info in failed_pages:
@@ -1520,10 +1515,13 @@ async def _do_auto_repair(
                     )
                     repairs["image_url"] = img_result.url
                     repairs["image_thumb_url"] = img_result.thumb_url or img_result.url
+                    repairs["image_model"] = img_result.model or "unknown"
+                    repairs["requested_image_model"] = getattr(image_service, "requested_model", None)
+                    repairs["image_tool"] = "codex_cli" if getattr(image_service, "provider_name", None) == "codex" else None
                     repaired = True
                     logger.info(f"[AutoRepair] Page {page_num} image repaired: {img_result.url}")
                     break
-                except GeminiImageContentError as e:
+                except ValueError as e:
                     logger.warning(f"[AutoRepair] Page {page_num} image content error (not retryable): {e}")
                     break  # 确定性失败，不再重试
                 except Exception as e:
@@ -1546,14 +1544,11 @@ async def _do_auto_repair(
             page_text = page_data.get("text", "")
             repaired = False
             try:
-                tts_result = await pipeline._retry_audio_with_fallback(
-                    text=page_text,
-                    voice_id=voice_id,
-                    index=page_idx,
-                    total=len(content_data["pages"]),
-                )
+                tts_result = await tts_service.synthesize(text=page_text, voice_id=voice_id)
                 repairs["audio_url"] = tts_result.audio_url
                 repairs["audio_duration"] = tts_result.duration
+                repairs["audio_model"] = tts_result.model
+                repairs["audio_voice_id"] = tts_result.voice_id
                 repaired = True
                 logger.info(f"[AutoRepair] Page {page_num} audio repaired: {tts_result.audio_url}")
             except Exception as e:
