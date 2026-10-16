@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from moana.services.llm.gemini import GeminiService
+from moana.services.llm import get_llm_service
 from moana.services.analytics import ChildStats
 
 
@@ -42,7 +42,7 @@ class AnalyticsAgent:
     """Agent for generating AI insights from analytics."""
 
     def __init__(self):
-        self._llm = GeminiService()
+        self._llm = get_llm_service()
 
     async def generate_insights(
         self,

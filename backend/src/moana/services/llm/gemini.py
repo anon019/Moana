@@ -1,16 +1,17 @@
 # src/moana/services/llm/gemini.py
 """Google Gemini LLM 服务.
 
-使用 REST transport 以支持 HTTP 代理。
+使用新版 google-genai SDK，支持 Vertex AI / API Key 双模式。
 """
 import json
 import re
 from typing import Type, TypeVar
 
-import google.generativeai as genai
+from google.genai import types
 from pydantic import BaseModel
 
 from moana.config import get_settings
+from moana.services.gemini_client import get_gemini_client
 from moana.services.llm.base import BaseLLMService
 
 T = TypeVar("T", bound=BaseModel)
@@ -23,15 +24,13 @@ class GeminiService(BaseLLMService):
     文档: https://ai.google.dev/gemini-api/docs
     """
 
-    def __init__(self):
+    def __init__(self, *, retry_attempts: int | None = None):
         settings = get_settings()
-        # 使用 REST transport 以支持 HTTP 代理
-        genai.configure(
-            api_key=settings.google_api_key,
-            transport="rest",  # 使用 REST 而非 gRPC，支持代理
-        )
         self._model_name = settings.google_model
-        self._model = genai.GenerativeModel(self._model_name)
+        self._client = (
+            get_gemini_client(retry_attempts=retry_attempts)
+            if retry_attempts is not None else get_gemini_client()
+        )
 
     @property
     def model_name(self) -> str:
@@ -45,45 +44,50 @@ class GeminiService(BaseLLMService):
         max_tokens: int = 4096,
     ) -> str:
         """使用 Gemini 生成文本."""
-        import asyncio
-        from google.generativeai.types import HarmCategory, HarmBlockThreshold
-
-        # 构建完整提示
-        full_prompt = prompt
-        if system_prompt:
-            full_prompt = f"{system_prompt}\n\n{prompt}"
-
         # 配置生成参数
-        # 注意: gemini-3-pro-preview 需要 max_output_tokens >= 1000
+        # 注意: gemini-3-flash-preview / gemini-3.1-pro-preview 需要 max_output_tokens >= 1000
         # 可能是因为内部思考链机制需要预留 token 空间
         effective_max_tokens = max(max_tokens, 1000)
-        generation_config = genai.GenerationConfig(
+
+        config = types.GenerateContentConfig(
             temperature=temperature,
             max_output_tokens=effective_max_tokens,
+            safety_settings=[
+                types.SafetySetting(
+                    category="HARM_CATEGORY_HARASSMENT",
+                    threshold="BLOCK_ONLY_HIGH",
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_HATE_SPEECH",
+                    threshold="BLOCK_ONLY_HIGH",
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                    threshold="BLOCK_ONLY_HIGH",
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_DANGEROUS_CONTENT",
+                    threshold="BLOCK_ONLY_HIGH",
+                ),
+            ],
         )
 
-        # 安全设置 - 儿童教育内容场景，适当放宽限制
-        safety_settings = {
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_ONLY_HIGH,
-        }
+        # 使用 SDK 的 system_instruction 参数
+        if system_prompt:
+            config.system_instruction = system_prompt
 
-        # REST transport 只支持同步调用，使用 run_in_executor
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: self._model.generate_content(
-                full_prompt,
-                generation_config=generation_config,
-                safety_settings=safety_settings,
-            )
+        # 使用异步 SDK 调用
+        response = await self._client.aio.models.generate_content(
+            model=self._model_name,
+            contents=prompt,
+            config=config,
         )
 
         # 处理安全过滤的情况
         if not response.candidates or not response.candidates[0].content.parts:
-            finish_reason = response.candidates[0].finish_reason if response.candidates else "UNKNOWN"
+            finish_reason = (
+                response.candidates[0].finish_reason if response.candidates else "UNKNOWN"
+            )
             raise ValueError(f"Gemini response blocked (finish_reason={finish_reason})")
 
         return response.text

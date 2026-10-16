@@ -7,7 +7,6 @@ import asyncio
 import logging
 import re
 
-from google import genai
 from google.genai import types
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -63,9 +62,9 @@ class GeminiImageService(BaseImageService):
 
     def __init__(self):
         settings = get_settings()
-        self._api_key = settings.google_api_key
         self._model = settings.gemini_image_model
-        self._client = genai.Client(api_key=self._api_key)
+        from moana.services.gemini_client import get_gemini_client
+        self._client = get_gemini_client()
         logger.info(f"GeminiImageService initialized with model: {self._model}")
 
     @property

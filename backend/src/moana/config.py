@@ -1,4 +1,5 @@
 from functools import lru_cache
+import sys
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,31 +16,26 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://moana:moana123@localhost:5432/moana"
 
     # === Provider 选择（运行时可切换） ===
-    # LLM 支持: gemini (原生) | openrouter (多模型) | claude
-    llm_provider: str = "gemini"  # gemini | openrouter | claude
-    image_provider: str = "gemini"  # gemini | wanx | minimax | qwen | flux
-    tts_provider: str = "gemini"  # gemini | qwen | minimax | fish_speech
+    # 文本使用现有 Codex 登录；Google 后端统一禁用。
+    llm_provider: str = "codex"  # codex | gemini | openrouter | claude
+    codex_model: str = "gpt-6-luna"
+    codex_timeout: float = 180.0
+    image_provider: str = "codex"  # codex | disabled | wanx | minimax | qwen | flux
+    codex_image_model: str = "gpt-image-2.5-sunburst"
+    codex_image_timeout: float = 240.0
+    codex_image_isolate: bool = True  # 独立 systemd worker，避免挤占 API 后端 300MiB 上限。
+    tts_provider: str = "fish_free_cli"  # fish_free_cli | disabled
     music_provider: str = "suno"  # suno | minimax
-    video_provider: str = "veo"  # veo | wanx | minimax
+    video_provider: str = "disabled"  # disabled | wanx | minimax
 
-    # === LLM - Google Gemini (原生 API，主力) ===
-    # 可用模型: gemini-3-flash-preview | gemini-3.1-pro-preview | gemini-2.5-flash
-    google_api_key: str = ""
+    # === Google 历史配置（已停用，保留缓存兼容字段） ===
     google_model: str = "gemini-3-flash-preview"
 
     # === LLM - Anthropic Claude (原生 API，备选) ===
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"
 
-    # === LLM - OpenRouter (多模型网关，推荐) ===
-    # 支持的模型 (2025年12月最新):
-    # - anthropic/claude-4.5-sonnet (最新最强，推荐)
-    # - anthropic/claude-4.5-opus (最强推理)
-    # - google/gemini-2.5-flash (快速便宜)
-    # - google/gemini-3.1-pro-preview (Gemini 3.1 Pro)
-    # - openai/gpt-5 (OpenAI 旗舰)
-    # - x-ai/grok-4.1-fast (Grok 4.1)
-    # - deepseek/deepseek-chat-v3-0324 (DeepSeek V3，便宜)
+    # === LLM - OpenRouter（仅保留非 Google 兼容接口） ===
     openrouter_api_key: str = ""
     openrouter_model: str = "anthropic/claude-4.5-sonnet"
     openrouter_site_url: str = "http://localhost:3000"
@@ -81,26 +77,32 @@ class Settings(BaseSettings):
     midjourney_api_key: str = ""
     midjourney_api_base: str = "https://api.midjourney.com"
 
-    # === TTS - Fish Speech (备选) ===
+    # === TTS - Fish Audio 免费在线托管 ===
     fish_speech_api_key: str = ""
     fish_speech_api_base: str = "https://api.fish.audio"
+    fish_speech_voice_id: str = "cfe763b758ea496882bfae05808eb0c1"
+
+    # Fish 免费托管语音，通过短生命周期 CLI 调用。
+    tts_cli_python: str = sys.executable
+    tts_cli_timeout: float = 120.0
 
     # === Suno 音乐 (主力) - sunoapi.org ===
     suno_api_key: str = ""
     suno_api_base: str = "https://api.sunoapi.org"
     suno_model: str = "V5"
 
-    # === Google Gemini 图像生成 (Nano Banana 2，主力) ===
-    gemini_image_model: str = "gemini-3.1-flash-image-preview"
+    # === 已禁用的历史 Google 图片配置（仅供记录兼容） ===
+    gemini_image_model: str = "gemini-3.1-flash-image"
 
-    # === Google Gemini TTS (语音合成，主力) ===
-    # Pro 比 Flash 更稳定，对拟声词/特殊文本的处理更好，成本差异微乎其微
-    gemini_tts_model: str = "gemini-2.5-pro-preview-tts"
+    # === 已禁用的历史 Google TTS 配置 ===
+    gemini_tts_model: str = "gemini-3.1-flash-tts-preview"
     gemini_tts_voice: str = "Kore"  # 默认音色，适合儿童内容
 
-    # === Google Veo 3.1 (视频生成，主力) ===
-    # Available: veo-3.1-generate-preview (standard), veo-3.1-fast-generate-preview (fast)
-    veo_model: str = "veo-3.1-generate-preview"
+    # === 已禁用的历史 Google 视频配置 ===
+    # Vertex AI GA model ID; preview endpoint was discontinued in 2026-04.
+    veo_model: str = "veo-3.1-generate-001"
+    # Veo predictLongRunning 使用区域端点，不复用 Gemini 的 global 端点。
+    veo_location: str = "us-central1"
     veo_resolution: str = "720p"
     veo_duration: int = 8
 
@@ -109,7 +111,7 @@ class Settings(BaseSettings):
     storage_provider: str = "local"
 
     # Local storage (recommended for personal use)
-    storage_local_path: str = "/var/www/kids/media"
+    storage_local_path: str = "./media"
     storage_base_url: str = "http://localhost:8080/media"
     callback_base_url: str = "http://localhost:8080"
 

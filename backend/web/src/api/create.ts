@@ -46,7 +46,7 @@ export type ColorPalette = 'pastel' | 'vibrant' | 'warm' | 'cool' | 'monochrome'
 
 // 音色
 export type VoiceId = 'Cherry' | 'Jennifer' | 'Kiki' | 'Ethan' | 'Ryan' | 'Nofish'
-  | 'Kore' | 'Leda' | 'Aoede' | 'Puck' | 'Charon' | 'Fenrir'
+  | 'Kore' | 'Leda' | 'Aoede' | 'Puck' | 'Charon' | 'Fenrir' | string
 
 // 主角配置
 export interface ProtagonistConfig {
@@ -100,6 +100,7 @@ export interface VoiceOption {
   description?: string  // 详细说明
   emoji?: string
   recommended?: boolean
+  preview_url?: string | null
 }
 
 // 音乐情绪选项
@@ -426,58 +427,8 @@ const ART_STYLE_CATEGORIES: ArtStyleCategory[] = [
 // 展开所有风格为扁平列表
 const ALL_ART_STYLES: ArtStyleOption[] = ART_STYLE_CATEGORIES.flatMap(cat => cat.styles)
 
-// Gemini TTS 音色配置（增强描述）
-const ALL_TTS_VOICES: VoiceOption[] = [
-  {
-    id: 'Kore',
-    name: '柯瑞',
-    gender: 'female',
-    style: '温柔女声',
-    description: '语调柔和亲切，如妈妈般温暖。适合睡前故事、温馨家庭主题，给孩子满满安全感',
-    emoji: '👩',
-    recommended: true
-  },
-  {
-    id: 'Leda',
-    name: '蕾达',
-    gender: 'female',
-    style: '优雅女声',
-    description: '咬字清晰有韵律，声音优雅动听。适合经典童话、公主王子故事、文学性较强的内容',
-    emoji: '👩'
-  },
-  {
-    id: 'Aoede',
-    name: '艾欧德',
-    gender: 'female',
-    style: '清新女声',
-    description: '声音明快自然，充满活力。适合自然探索、户外冒险、动植物科普主题',
-    emoji: '👩'
-  },
-  {
-    id: 'Puck',
-    name: '帕克',
-    gender: 'male',
-    style: '活泼男声',
-    description: '语调俏皮有趣，富有表现力。适合调皮角色、搞笑故事、互动性强的内容',
-    emoji: '👦'
-  },
-  {
-    id: 'Charon',
-    name: '卡戎',
-    gender: 'male',
-    style: '沉稳男声',
-    description: '声音低沉有力，沉着冷静。适合冒险故事、神秘探索、需要可靠感的场景',
-    emoji: '👨'
-  },
-  {
-    id: 'Fenrir',
-    name: '芬里尔',
-    gender: 'male',
-    style: '雄浑男声',
-    description: '气势磅礴，充满力量感。适合史诗故事、英雄传说、勇气主题的内容',
-    emoji: '👨'
-  }
-]
+// 新创作音色由后端 Fish 配置提供；旧语音 ID 类型保留用于历史记录。
+const ALL_TTS_VOICES: VoiceOption[] = []
 
 // 乐器配置
 export interface InstrumentOption {
@@ -744,7 +695,7 @@ export async function getStyleOptions(): Promise<StyleOptions> {
       protagonists: result.protagonists?.length ? result.protagonists : DEFAULT_STYLE_OPTIONS.protagonists,
       color_palettes: result.color_palettes?.length ? result.color_palettes : DEFAULT_STYLE_OPTIONS.color_palettes,
       music_moods: DEFAULT_STYLE_OPTIONS.music_moods, // 强制使用前端配置
-      tts_voices: DEFAULT_STYLE_OPTIONS.tts_voices,   // 强制使用前端配置（Gemini TTS）
+      tts_voices: Array.isArray(result.tts_voices) ? result.tts_voices : DEFAULT_STYLE_OPTIONS.tts_voices,
       video_options: result.video_options?.models?.length ? result.video_options : DEFAULT_STYLE_OPTIONS.video_options,
       video_motion_styles: DEFAULT_STYLE_OPTIONS.video_motion_styles // 强制使用前端配置
     }

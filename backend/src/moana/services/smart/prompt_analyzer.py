@@ -1,12 +1,9 @@
 """Smart prompt analyzer for user custom descriptions."""
-import json
 import logging
 from dataclasses import dataclass
 
-from google import genai
-from google.genai import types
-
-from moana.config import get_settings
+from moana.services.llm import get_llm_service
+from moana.services.llm.codex import parse_json_response
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +40,7 @@ class SmartPromptAnalyzer:
 只返回 JSON，不要其他内容。theme_category 只填写英文单词，不要填写中文。"""
 
     def __init__(self):
-        settings = get_settings()
-        self._client = genai.Client(api_key=settings.google_api_key)
-        self._model = "gemini-3-flash-preview"
+        self._llm = get_llm_service()
 
     async def analyze(
         self,
@@ -75,18 +70,8 @@ class SmartPromptAnalyzer:
         logger.info(f"Analyzing prompt: {custom_prompt[:50]}...")
 
         try:
-            response = self._client.models.generate_content(
-                model=self._model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                ),
-            )
-
-            result_text = response.text.strip()
-            logger.debug(f"Analysis result: {result_text}")
-
-            data = json.loads(result_text)
+            result_text = await self._llm.generate(prompt=prompt)
+            data = parse_json_response(result_text)
 
             return AnalysisResult(
                 theme_category=data.get("theme_category", "other"),

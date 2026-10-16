@@ -1,31 +1,22 @@
 # src/moana/services/prompt/enhancer.py
-"""Prompt enhancement service using Gemini for Suno music generation.
+"""Prompt enhancement service using LLM for Suno music generation.
 
 V2 redesign:
 - 支持 31+ 动态参数
 - 生成 Suno V5 专用提示词（英文+风格标签）
 - 500 字符限制优化
-- 支持 HTTP 代理
+- 使用统一文本模型配置
 """
 
 import logging
-import os
 import time
 from dataclasses import dataclass
 from typing import Optional
 
-import google.generativeai as genai
-import httpx
-
-from moana.config import get_settings
+from moana.services.llm import get_llm_service
 from moana.services.prompt.templates import build_preset_template, build_smart_template
 
 logger = logging.getLogger(__name__)
-
-
-def _get_proxy_url() -> Optional[str]:
-    """Get proxy URL from environment variables."""
-    return os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or os.environ.get("ALL_PROXY")
 
 
 # Suno V5 专用系统提示词 - 重点强化主题创意
@@ -114,38 +105,17 @@ class EnhanceResult:
 
 
 class PromptEnhancer:
-    """Prompt enhancement service using Gemini.
+    """Prompt enhancement service using LLM.
 
     Enhances user parameters into Suno V5 optimized prompts.
     Supports 31+ dynamic parameters with automatic template generation.
     """
 
     def __init__(self, model_name: Optional[str] = None):
-        settings = get_settings()
-        # Use gemini-3-flash-preview for best parameter understanding (2025-12-17 release)
-        self._model_name = model_name or "gemini-3-flash-preview"
-
-        # Configure Gemini with proxy support
-        proxy_url = _get_proxy_url()
-        if proxy_url:
-            logger.info(f"Using proxy for Gemini API: {proxy_url}")
-            # Create httpx client with proxy
-            http_client = httpx.Client(proxy=proxy_url, timeout=30.0)
-            genai.configure(
-                api_key=settings.google_api_key,
-                transport="rest",  # Use REST transport for proxy support
-            )
-            self._http_client = http_client
-        else:
-            logger.warning("No proxy configured for Gemini API")
-            genai.configure(api_key=settings.google_api_key)
-            self._http_client = None
-
-        self._model = genai.GenerativeModel(
-            model_name=self._model_name,
-            system_instruction=SUNO_ENHANCE_SYSTEM_PROMPT,
-        )
-        self._api_key = settings.google_api_key
+        self._llm = get_llm_service()
+        self._model_name = self._llm.model_name
+        if model_name is not None and model_name != self._model_name:
+            raise ValueError("提示词模型由 LLM_PROVIDER 和对应模型配置统一选择")
 
     async def enhance(self, params: dict) -> EnhanceResult:
         """Enhance parameters into a Suno-optimized prompt.
@@ -170,11 +140,11 @@ class PromptEnhancer:
 
         logger.info(f"Template prompt ({len(template_prompt)} chars): {template_prompt[:100]}...")
 
-        # Enhance with Gemini (use REST API with proxy)
-        enhanced_prompt = await self._call_gemini_api(template_prompt)
+        # 通过配置的文本服务增强提示词
+        enhanced_prompt = await self._call_llm_api(template_prompt)
 
         if not enhanced_prompt:
-            logger.warning("Gemini API failed, using fallback prompt")
+            logger.warning("LLM API failed, using fallback prompt")
             enhanced_prompt = self._build_fallback_prompt(params)
 
         duration_ms = int((time.time() - start_time) * 1000)
@@ -188,96 +158,44 @@ class PromptEnhancer:
             duration_ms=duration_ms,
         )
 
-    async def _call_gemini_api(self, prompt: str) -> Optional[str]:
-        """Call Gemini API directly with proxy support.
-
-        Args:
-            prompt: The prompt to send to Gemini.
-
-        Returns:
-            Enhanced prompt string or None if failed.
-        """
-        proxy_url = _get_proxy_url()
-
-        # Gemini REST API endpoint
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model_name}:generateContent"
-
-        # Request payload
-        payload = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": prompt}]
-                }
-            ],
-            "systemInstruction": {
-                "parts": [{"text": SUNO_ENHANCE_SYSTEM_PROMPT}]
-            },
-            "generationConfig": {
-                "temperature": 0.7,
-                "maxOutputTokens": 250,
-            }
-        }
-
+    async def _call_llm_api(self, prompt: str) -> Optional[str]:
+        """通过统一文本服务生成提示词，失败沿用既有模板回退。"""
         try:
-            async with httpx.AsyncClient(proxy=proxy_url, timeout=30.0) as client:
-                response = await client.post(
-                    url,
-                    json=payload,
-                    params={"key": self._api_key},
-                    headers={"Content-Type": "application/json"},
+            enhanced_prompt = (await self._llm.generate(
+                prompt=prompt, system_prompt=SUNO_ENHANCE_SYSTEM_PROMPT,
+                temperature=0.7, max_tokens=250,
+            )).strip()
+
+            # Clean up: remove markdown formatting if present
+            if enhanced_prompt.startswith("```"):
+                lines = enhanced_prompt.split("\n")
+                enhanced_prompt = "\n".join(
+                    line for line in lines
+                    if not line.startswith("```")
+                ).strip()
+
+            # Ensure within Suno limit (500 chars max, target <=450)
+            if len(enhanced_prompt) > 450:
+                truncated = enhanced_prompt[:447]
+                last_period = max(
+                    truncated.rfind("."),
+                    truncated.rfind("\u3002"),
+                    truncated.rfind(","),
                 )
+                if last_period > 300:
+                    enhanced_prompt = truncated[:last_period + 1]
+                else:
+                    enhanced_prompt = truncated + "..."
+                logger.warning(f"Enhanced prompt truncated to {len(enhanced_prompt)} chars")
 
-                if response.status_code != 200:
-                    logger.error(f"Gemini API error: {response.status_code} - {response.text[:200]}")
-                    return None
-
-                data = response.json()
-
-                # Extract text from response
-                candidates = data.get("candidates", [])
-                if not candidates:
-                    logger.error("Gemini API returned no candidates")
-                    return None
-
-                content = candidates[0].get("content", {})
-                parts = content.get("parts", [])
-                if not parts:
-                    logger.error("Gemini API returned no parts")
-                    return None
-
-                enhanced_prompt = parts[0].get("text", "").strip()
-
-                # Clean up: remove markdown formatting if present
-                if enhanced_prompt.startswith("```"):
-                    lines = enhanced_prompt.split("\n")
-                    enhanced_prompt = "\n".join(
-                        line for line in lines
-                        if not line.startswith("```")
-                    ).strip()
-
-                # Ensure within Suno limit (500 chars max, target ≤450)
-                if len(enhanced_prompt) > 450:
-                    truncated = enhanced_prompt[:447]
-                    last_period = max(
-                        truncated.rfind("."),
-                        truncated.rfind("。"),
-                        truncated.rfind(","),
-                    )
-                    if last_period > 300:
-                        enhanced_prompt = truncated[:last_period + 1]
-                    else:
-                        enhanced_prompt = truncated + "..."
-                    logger.warning(f"Enhanced prompt truncated to {len(enhanced_prompt)} chars")
-
-                return enhanced_prompt
+            return enhanced_prompt
 
         except Exception as e:
-            logger.error(f"Gemini API call failed: {e}")
+            logger.error(f"LLM API call failed: {e}")
             return None
 
     def _build_fallback_prompt(self, params: dict) -> str:
-        """Build a simple fallback prompt when Gemini fails.
+        """Build a simple fallback prompt when LLM fails.
 
         Args:
             params: Dictionary with all parameters.

@@ -49,7 +49,7 @@ export const useCreateStore = defineStore('create', () => {
       accessory: 'blue overalls'
     } as ProtagonistConfig,
     colorPalette: 'pastel' as string,
-    voiceId: 'Kore',
+    voiceId: '',
     // 故事增强参数
     storyEnhancement: {
       narrative_pace: null as string | null,
@@ -157,6 +157,10 @@ export const useCreateStore = defineStore('create', () => {
       themes.value = DEFAULT_THEMES
       // 风格选项从后端获取，有默认值兜底
       styleOptions.value = await getStyleOptions()
+      const voices = styleOptions.value.tts_voices
+      if (!voices.some(voice => voice.id === pictureBookParams.value.voiceId)) {
+        pictureBookParams.value.voiceId = voices.find(voice => voice.recommended)?.id || voices[0]?.id || ''
+      }
     } catch (e) {
       console.error('加载选项失败:', e)
     } finally {
@@ -185,7 +189,7 @@ export const useCreateStore = defineStore('create', () => {
         artStyle: 'pixar_3d',
         protagonist: { animal: 'bunny', color: 'white', accessory: 'blue overalls' },
         colorPalette: 'pastel',
-        voiceId: 'Kore',
+        voiceId: styleOptions.value?.tts_voices.find(voice => voice.recommended)?.id || styleOptions.value?.tts_voices[0]?.id || '',
         storyEnhancement: {
           narrative_pace: null,
           interaction_density: null,
